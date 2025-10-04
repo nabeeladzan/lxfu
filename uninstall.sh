@@ -26,8 +26,7 @@ rm -f "/etc/lxfu/lxfu.conf"
 rm -f "${PREFIX}/share/lxfu/dino.pt"
 
 if [[ -d "${PREFIX}/lib/lxfu" ]]; then
-  rm -f "${PREFIX}/lib/lxfu"/*
-  rmdir --ignore-fail-on-non-empty "${PREFIX}/lib/lxfu"
+  rm -rf "${PREFIX}/lib/lxfu"
 fi
 
 if [[ -d "${PREFIX}/share/lxfu" ]]; then
@@ -37,4 +36,3 @@ fi
 if [[ -d "/etc/lxfu" ]]; then
   rmdir --ignore-fail-on-non-empty "/etc/lxfu"
 fi
-
