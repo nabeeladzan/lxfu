@@ -8,6 +8,9 @@
 #include <filesystem>
 
 class LMDBStore {
+public:
+    enum class Mode { ReadWrite, ReadOnly };
+
 private:
     MDB_env* env_;
     MDB_dbi dbi_;
@@ -15,7 +18,6 @@ private:
     Mode mode_;
 
 public:
-    enum class Mode { ReadWrite, ReadOnly };
     LMDBStore(const std::string& db_path, Mode mode = Mode::ReadWrite)
         : env_(nullptr), dbi_(0), db_path_(db_path), mode_(mode) {
         if (mode_ == Mode::ReadWrite) {

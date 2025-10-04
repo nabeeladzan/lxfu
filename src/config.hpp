@@ -12,7 +12,7 @@ class Config {
 private:
     std::map<std::string, std::string> values_;
     
-    std::string expand_path(const std::string& path) {
+    std::string expand_path(const std::string& path) const {
         if (path.empty()) return path;
         
         // Expand ~ to home directory

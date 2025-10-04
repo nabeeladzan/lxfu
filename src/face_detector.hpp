@@ -187,7 +187,7 @@ public:
                 std::min(image.rows - face.y + pad_y, face.height + 2 * pad_y)
             );
             
-            cv::rectangle(image, padded_face, cv::Scalar(255, 255, 0), 1, cv::LINE_DASHED);
+            cv::rectangle(image, padded_face, cv::Scalar(255, 255, 0), 1, cv::LINE_8);
         }
         
         // Draw face count
