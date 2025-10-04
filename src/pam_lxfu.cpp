@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <ctime>
 
 namespace {
 
@@ -30,6 +31,8 @@ struct ModuleOptions {
     double threshold = 0.90;
     bool debug = false;
     bool allow_all = false;
+    int retries = 1;
+    double interval_seconds = 0.0;
 };
 
 ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
@@ -63,6 +66,28 @@ ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
                 opts.threshold = std::stod(value);
             } catch (const std::exception&) {
                 pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid threshold '%s'", value.c_str());
+            }
+        } else if (key == "retries") {
+            try {
+                int r = std::stoi(value);
+                if (r < 1) {
+                    pam_syslog(pamh, LOG_WARNING, "pam_lxfu: retries must be >=1, received %d", r);
+                } else {
+                    opts.retries = r;
+                }
+            } catch (const std::exception&) {
+                pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid retries '%s'", value.c_str());
+            }
+        } else if (key == "interval") {
+            try {
+                double seconds = std::stod(value);
+                if (seconds < 0.0) {
+                    pam_syslog(pamh, LOG_WARNING, "pam_lxfu: interval must be >=0, received %f", seconds);
+                } else {
+                    opts.interval_seconds = seconds;
+                }
+            } catch (const std::exception&) {
+                pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid interval '%s'", value.c_str());
             }
         } else {
             pam_syslog(pamh, LOG_WARNING, "pam_lxfu: unknown option '%s'", key.c_str());
@@ -241,15 +266,40 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t* pamh, int, int argc, const char
         return PAM_USER_UNKNOWN;
     }
 
-    try {
-        return match_user_with_face(pamh, user, opts);
-    } catch (const std::exception& ex) {
-        pam_syslog(pamh, LOG_ERR, "pam_lxfu: exception: %s", ex.what());
-        return PAM_AUTHINFO_UNAVAIL;
-    } catch (...) {
-        pam_syslog(pamh, LOG_ERR, "pam_lxfu: unknown exception during authentication");
-        return PAM_AUTHINFO_UNAVAIL;
+    int attempts = std::max(1, opts.retries);
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        try {
+            int result = match_user_with_face(pamh, user, opts);
+            if (result == PAM_SUCCESS) {
+                return PAM_SUCCESS;
+            }
+
+            if (result == PAM_AUTHINFO_UNAVAIL) {
+                return result;
+            }
+
+            if (attempt < attempts) {
+                pam_syslog(pamh, LOG_INFO, "pam_lxfu: attempt %d/%d failed for user '%s'", attempt, attempts, user);
+                pam_prompt(pamh, PAM_TEXT_INFO, nullptr, "Face not recognized, please try again.");
+                if (opts.interval_seconds > 0.0) {
+                    const int usec = static_cast<int>(opts.interval_seconds * 1'000'000.0);
+                    struct timespec ts {
+                        usec / 1'000'000,
+                        static_cast<long>((usec % 1'000'000) * 1000)
+                    };
+                    nanosleep(&ts, nullptr);
+                }
+            }
+
+        } catch (const std::exception& ex) {
+            pam_syslog(pamh, LOG_ERR, "pam_lxfu: exception: %s", ex.what());
+            return PAM_AUTHINFO_UNAVAIL;
+        } catch (...) {
+            pam_syslog(pamh, LOG_ERR, "pam_lxfu: unknown exception during authentication");
+            return PAM_AUTHINFO_UNAVAIL;
+        }
     }
+    return PAM_AUTH_ERR;
 }
 
 PAM_EXTERN int pam_sm_setcred(pam_handle_t*, int, int, const char**) {
