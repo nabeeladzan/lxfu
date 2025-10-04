@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <ctime>
+#include <numeric>
 
 namespace {
 
@@ -189,87 +190,62 @@ int match_user_with_face(pam_handle_t* pamh, const std::string& username, const 
         return PAM_AUTHINFO_UNAVAIL;
     }
 
-    std::string faiss_path = config.get_faiss_index_path();
-    engine.init_index(faiss_path, static_cast<int>(embedding.size()));
-
-    if (engine.get_index_size() == 0) {
-        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: FAISS index is empty; no faces enrolled");
+    LMDBStore store(config.get_embeddings_path(), LMDBStore::Mode::ReadOnly);
+    auto entries = store.get_all_embeddings();
+    if (entries.empty()) {
+        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: no enrolled profiles available");
         return PAM_AUTHINFO_UNAVAIL;
     }
 
-    int64_t index_size = static_cast<int64_t>(engine.get_index_size());
-    int k = static_cast<int>(std::min<int64_t>(index_size, 10));
-    auto candidates = engine.search_many(embedding, k);
-    if (candidates.empty()) {
-        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: no similar face found");
-        return PAM_AUTH_ERR;
-    }
-
-    LMDBStore store(config.get_lmdb_path(), LMDBStore::Mode::ReadOnly);
-    std::unordered_map<std::string, std::vector<FaceEngine::SearchResult>> grouped;
-    for (const auto& candidate : candidates) {
-        std::string stored_name = store.get_name(candidate.id);
-        if (!stored_name.empty()) {
-            grouped[stored_name].push_back(candidate);
+    auto compute_best = [&](const std::vector<std::pair<std::string, std::vector<float>>>& profiles,
+                            const std::optional<std::string>& target) -> std::pair<std::string, float> {
+        float best = -1.0f;
+        std::string best_name;
+        for (const auto& [name, stored_embedding] : profiles) {
+            if (target && name != *target) {
+                continue;
+            }
+            if (stored_embedding.size() != embedding.size()) {
+                continue;
+            }
+            float sim = std::inner_product(embedding.begin(), embedding.end(),
+                                           stored_embedding.begin(), 0.0f);
+            if (sim > best) {
+                best = sim;
+                best_name = name;
+            }
         }
-    }
-
-    if (grouped.empty()) {
-        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: no stored names associated with FAISS results");
-        return PAM_AUTH_ERR;
-    }
-
-    auto compute_average = [](const std::vector<FaceEngine::SearchResult>& results) {
-        if (results.empty()) {
-            return 0.0f;
-        }
-        float sum = 0.0f;
-        for (const auto& r : results) {
-            sum += r.similarity;
-        }
-        return sum / results.size();
+        return {best_name, best};
     };
 
     if (!opts.allow_all) {
-        std::string desired_name = opts.target_name.value_or(username);
-        auto it = grouped.find(desired_name);
-        if (it == grouped.end()) {
-            pam_syslog(pamh, LOG_INFO, "pam_lxfu: no match for requested name '%s'", desired_name.c_str());
+        std::string desired = opts.target_name.value_or(username);
+        auto [matched_name, similarity] = compute_best(entries, desired);
+        if (similarity < 0.0f) {
+            pam_syslog(pamh, LOG_INFO, "pam_lxfu: no match for requested name '%s'", desired.c_str());
             return PAM_AUTH_ERR;
         }
-        float avg = compute_average(it->second);
-        if (avg < static_cast<float>(opts.threshold)) {
-            pam_syslog(pamh, LOG_INFO, "pam_lxfu: average similarity %.2f below threshold %.2f for '%s'",
-                       avg, opts.threshold, desired_name.c_str());
+        if (similarity < static_cast<float>(opts.threshold)) {
+            pam_syslog(pamh, LOG_INFO, "pam_lxfu: similarity %.2f below threshold %.2f for '%s'",
+                       similarity, opts.threshold, desired.c_str());
             return PAM_AUTH_ERR;
         }
         if (opts.debug) {
-            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: user '%s' matched with average similarity %.2f using %zu samples",
-                       desired_name.c_str(), avg, it->second.size());
+            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: user '%s' matched with similarity %.2f",
+                       desired.c_str(), similarity);
         }
         return PAM_SUCCESS;
     }
 
-    std::string best_name;
-    float best_avg = -2.0f;
-    size_t best_count = 0;
-    for (const auto& [name, vec] : grouped) {
-        float avg = compute_average(vec);
-        if (avg > best_avg) {
-            best_avg = avg;
-            best_name = name;
-            best_count = vec.size();
-        }
-    }
-
-    if (best_name.empty() || best_avg < static_cast<float>(opts.threshold)) {
+    auto [best_name, best_similarity] = compute_best(entries, std::nullopt);
+    if (best_name.empty() || best_similarity < static_cast<float>(opts.threshold)) {
         pam_syslog(pamh, LOG_INFO, "pam_lxfu: no profile exceeded threshold %.2f", opts.threshold);
         return PAM_AUTH_ERR;
     }
 
     if (opts.debug) {
-        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: matched profile '%s' with average similarity %.2f using %zu samples",
-                   best_name.c_str(), best_avg, best_count);
+        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: matched profile '%s' with similarity %.2f",
+                   best_name.c_str(), best_similarity);
     }
 
     return PAM_SUCCESS;

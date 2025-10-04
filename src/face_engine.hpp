@@ -3,20 +3,15 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
-#include <faiss/IndexFlat.h>
-#include <faiss/index_io.h>
-
 #include <memory>
 #include <string>
 #include <filesystem>
-#include <algorithm>
 #include <vector>
 
 class FaceEngine {
 private:
     torch::jit::script::Module model_;
     torch::Device device_;
-    std::unique_ptr<faiss::IndexFlatIP> index_;
     int feature_dim_;
     bool verbose_;
     
@@ -98,85 +93,10 @@ public:
         // Convert to vector
         float* data = output.data_ptr<float>();
         int64_t size = output.size(1);
-        
+        feature_dim_ = static_cast<int>(size);
+
         return std::vector<float>(data, data + size);
     }
-    
-    // Initialize or load FAISS index
-    void init_index(const std::string& index_path, int dimension) {
-        feature_dim_ = dimension;
 
-        if (std::filesystem::exists(index_path)) {
-            if (verbose_) {
-                std::cout << "Loading existing FAISS index..." << std::endl;
-            }
-            faiss::Index* loaded = faiss::read_index(index_path.c_str());
-            index_.reset(dynamic_cast<faiss::IndexFlatIP*>(loaded));
-            if (verbose_) {
-                std::cout << "Loaded index with " << index_->ntotal << " faces" << std::endl;
-            }
-        } else {
-            if (verbose_) {
-                std::cout << "Creating new FAISS index..." << std::endl;
-            }
-            index_.reset(new faiss::IndexFlatIP(dimension));
-        }
-    }
-    
-    // Add embedding to index
-    int64_t add_embedding(const std::vector<float>& embedding) {
-        if (!index_) {
-            throw std::runtime_error("Index not initialized");
-        }
-        
-        int64_t id = index_->ntotal;
-        index_->add(1, embedding.data());
-        return id;
-    }
-    
-    // Search for similar embeddings
-    struct SearchResult {
-        int64_t id;
-        float similarity;
-    };
-
-    SearchResult search(const std::vector<float>& embedding, int k = 1) {
-        auto results = search_many(embedding, k);
-        if (results.empty()) {
-            return {-1, 0.0f};
-        }
-        return results.front();
-    }
-
-    std::vector<SearchResult> search_many(const std::vector<float>& embedding, int k) {
-        if (!index_ || index_->ntotal == 0 || k <= 0) {
-            return {};
-        }
-
-        int64_t limit = std::min<int64_t>(index_->ntotal, k);
-        std::vector<faiss::idx_t> labels(limit);
-        std::vector<float> similarities(limit);
-
-        index_->search(1, embedding.data(), limit, similarities.data(), labels.data());
-
-        std::vector<SearchResult> results;
-        results.reserve(limit);
-        for (int64_t i = 0; i < limit; ++i) {
-            results.push_back({labels[i], similarities[i]});
-        }
-        return results;
-    }
-    
-    // Save index to disk
-    void save_index(const std::string& index_path) {
-        if (index_) {
-            faiss::write_index(index_.get(), index_path.c_str());
-            if (verbose_) {
-                std::cout << "Index saved with " << index_->ntotal << " faces" << std::endl;
-            }
-        }
-    }
-    
-    int get_feature_dim() const { return feature_dim_; }
-    size_t get_index_size() const { return index_ ? index_->ntotal : 0; }
+    int embedding_dim() const { return feature_dim_; }
 };

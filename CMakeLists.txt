@@ -63,13 +63,6 @@ find_library(PAM_LIB pam REQUIRED)
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-# Add FAISS subdirectory (CPU only)
-set(FAISS_ENABLE_GPU OFF CACHE BOOL "Disable GPU support")
-set(FAISS_ENABLE_PYTHON OFF CACHE BOOL "Disable Python bindings")
-set(FAISS_OPT_LEVEL generic CACHE STRING "Use generic optimization")
-set(BUILD_TESTING OFF CACHE BOOL "Disable FAISS tests")
-add_subdirectory(faiss EXCLUDE_FROM_ALL)
-
 # Build LMDB as a static library
 add_library(lmdb STATIC 
     lmdb/mdb.c
@@ -80,17 +73,17 @@ set_target_properties(lmdb PROPERTIES LINKER_LANGUAGE C)
 
 # Main LXFU executable
 add_executable(lxfu src/lxfu.cpp)
-target_link_libraries(lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} faiss lmdb pthread)
+target_link_libraries(lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} lmdb pthread)
 target_include_directories(lxfu PRIVATE src)
 target_compile_features(lxfu PRIVATE cxx_std_17)
 
 # Original demo (optional)
 add_executable(dinov3_demo src/main.cpp)
-target_link_libraries(dinov3_demo PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} faiss lmdb pthread)
+target_link_libraries(dinov3_demo PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} lmdb pthread)
 target_compile_features(dinov3_demo PRIVATE cxx_std_17)
 
 add_library(pam_lxfu MODULE src/pam_lxfu.cpp)
-target_link_libraries(pam_lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} faiss lmdb pthread ${PAM_LIB})
+target_link_libraries(pam_lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} lmdb pthread ${PAM_LIB})
 target_include_directories(pam_lxfu PRIVATE src)
 target_compile_features(pam_lxfu PRIVATE cxx_std_17)
 set_target_properties(pam_lxfu PROPERTIES PREFIX "" SUFFIX ".so")

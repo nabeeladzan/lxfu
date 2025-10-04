@@ -83,13 +83,9 @@ public:
         std::string db_path = get("db_path");
         std::filesystem::create_directories(db_path);
     }
-    
-    std::string get_faiss_index_path() const {
-        return expand_path(get("db_path")) + "/lxfu_faces.index";
-    }
-    
-    std::string get_lmdb_path() const {
-        return expand_path(get("db_path")) + "/lxfu_metadata.db";
+
+    std::string get_embeddings_path() const {
+        return expand_path(get("db_path")) + "/embeddings";
     }
 };
 

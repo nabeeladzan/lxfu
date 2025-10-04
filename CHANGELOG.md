@@ -42,14 +42,11 @@
 ### CLI Enhancements
 
 - Added flag-based argument parsing for `enroll`/`query` (`--device`, `--file`, `--name`).
-- Default profile name is `default`; running `lxfu enroll` without arguments captures from the configured default device.
-- `--all` on `query` allows matching any enrolled name, while `--name` restricts to a specific profile.
-- Query paths now average cosine scores across all stored samples per profile rather than using only the single best embedding.
-- Camera-based enroll/query now keep capturing frames until a face is detected (or the user cancels), improving robustness for flickering IR lighting.
-- New management commands:
-  - `lxfu list` summarises enrolled profiles and their embedding IDs.
-  - `lxfu delete --name/--id` removes specific entries (rebuilding the FAISS index).
-  - `lxfu clear` wipes both FAISS and LMDB data, with optional `--confirm` to skip interactive prompts.
+- Embeddings are now stored directly in LMDB and compared with cosine similarity—FAISS is no longer required.
+- Profile management commands:
+  - `lxfu list` enumerates stored profiles and vector dimensions.
+  - `lxfu delete --name` removes a profile (with optional `--confirm`).
+  - `lxfu clear` wipes all stored profiles (with optional `--confirm`).
 
 ### Usage Examples
 
@@ -84,8 +81,7 @@ lxfu --preview query /dev/video0          # Show preview before query
 /usr/local/bin/lxfu              # Executable
 ~/.config/lxfu/lxfu.conf         # User configuration (optional)
 ~/.lxfu/                         # User databases
-  ├── lxfu_faces.index           # FAISS index
-  └── lxfu_metadata.db/          # LMDB metadata
+  └── embeddings/                # LMDB environment holding profile vectors
 ```
 
 ### Migration Notes
@@ -94,9 +90,9 @@ If you have an existing LXFU installation:
 
 1. **Database location changed**: Databases now in `~/.lxfu/` instead of current directory
 
-   - Old: `./lxfu_faces.index`, `./lxfu_metadata.db/`
-   - New: `~/.lxfu/lxfu_faces.index`, `~/.lxfu/lxfu_metadata.db/`
-   - Migration: `mkdir -p ~/.lxfu && mv lxfu_*.* ~/.lxfu/`
+   - Old (FAISS-based): `./lxfu_faces.index`, `./lxfu_metadata.db/`
+   - New: `~/.lxfu/embeddings/` (LMDB environment)
+   - Migration: re-enroll faces or write a one-off conversion script if needed
 
 2. **Model location**: Place `dino.pt` in `/usr/share/lxfu/` for system-wide installation
 

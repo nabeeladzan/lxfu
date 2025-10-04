@@ -7,17 +7,17 @@
 - � **Face Detection**: Automatic face detection using Haar cascades for improved accuracy
 - �📹 **Webcam & File Support**: Enroll/query from camera devices or image files
 - 📊 **Cosine Similarity**: L2-normalized embeddings with inner product search
-- 💾 **Persistent Storage**: FAISS index + LMDB for fast retrieval
+- 💾 **Persistent Storage**: LMDB database storing normalized embeddings per profile
 - ⚙️ **Configuration System**: Standard Linux configuration with `/etc/lxfu/lxfu.conf`
 - 📦 **FHS Compliant**: Follows Filesystem Hierarchy Standard
 - ⚡ **Fast Search**: Sub-millisecond face matching
-- 🎓 **DINOv2 Embeddings**: State-of-the-art self-supervised vision featurese Utility
+- 🎓 **DINOv2 Embeddings**: State-of-the-art self-supervised vision features
 
-A high-performance headless face recognition CLI tool using DINOv2, FAISS, and LMDB.
+A high-performance headless face recognition CLI tool using DINOv2 and LMDB.
 
 ## Overview
 
-LXFU is a production-ready face recognition system designed for Linux environments. It uses Meta's DINOv2 vision transformer for feature extraction, FAISS for efficient similarity search, and LMDB for metadata storage.
+LXFU is a production-ready face recognition system designed for Linux environments. It uses Meta's DINOv2 vision transformer for feature extraction and stores normalized embeddings inside an LMDB database keyed by profile name.
 
 ## Installation
 
@@ -111,20 +111,17 @@ lxfu --preview query --file unknown.jpg --all
 ### Manage Profiles
 
 ```bash
-# Show counts and IDs for all enrolled profiles
+# Show all enrolled profiles and their embedding dimensions
 lxfu list
 
-# Delete every embedding stored for a profile (requires confirmation)
+# Delete a stored embedding for a profile (requires confirmation)
 lxfu delete --name nabeel --confirm
 
-# Delete a single embedding by ID (IDs reset after deletion)
-lxfu delete --id 3 --confirm
-
-# Wipe the FAISS index and LMDB metadata (asks for confirmation unless --confirm)
+# Remove every stored profile (asks for confirmation unless --confirm)
 lxfu clear --confirm
 ```
 
-All destructive actions prompt for a confirmation unless `--confirm` is supplied. After deletions the embedding IDs are compacted, so run `lxfu list` to review the new numbering.
+All destructive actions prompt for confirmation unless `--confirm` is supplied.
 
 ### Output Example
 
@@ -133,12 +130,9 @@ Loaded config from /etc/lxfu/lxfu.conf
 Loading/capturing face...
 Image loaded: 640x480
 Extracting face embedding...
-Searching for similar faces...
-
 ✓ Face recognized!
   Name: alice (requested)
-  Average similarity: 94.23%
-  Samples considered: 3
+  Similarity: 94.23%
 ```
 
 ### Preview Mode & Headless Fallback
@@ -147,7 +141,6 @@ Searching for similar faces...
 - When a display server is missing or OpenCV cannot open a window, LXFU logs a warning and continues with an instant capture so scripts do not break.
 - The same fallback applies to image previews, making `--preview` safe to use across desktops, servers, SSH sessions, CI jobs, and containers.
 - Preview overlays face bounding boxes when the Haar cascade is available, providing immediate feedback before capture.
-- For camera sources the CLI keeps capturing until it detects a face (or you cancel), helping mitigate IR flicker or poor first frames.
 
 ## Configuration File
 
@@ -195,18 +188,10 @@ default_device=/dev/video0
                │
                ▼
 ┌─────────────────────────────────────────┐
-│  L2 Normalization                       │
-│  - Prepare for cosine similarity        │
-└──────────────┬──────────────────────────┘
-               │
-      ┌────────┴────────┐
-      │                 │
-      ▼                 ▼
-┌──────────────┐  ┌──────────────┐
-│ FAISS Index  │  │  LMDB Store  │
-│ - Embeddings │  │  - ID → Name │
-│ - IndexFlatIP│  │  - Metadata  │
-└──────────────┘  └──────────────┘
+│  LMDB Storage                           │
+│  - Normalized embedding per profile     │
+│  - Cosine similarity via dot product    │
+└─────────────────────────────────────────┘
 ```
 
 ## Technical Details
@@ -231,8 +216,8 @@ default_device=/dev/video0
 ### Embedding & Search Pipeline
 
 - Frames are resized to 224×224 and normalized with ImageNet statistics before being passed to the TorchScript DINOv2-small model (384-dimensional embeddings).
-- Embeddings are L2-normalized and stored in a FAISS `IndexFlatIP`, making inner-product search equivalent to cosine similarity.
-- FAISS is accelerated with OpenBLAS; LMDB maintains the ID → name metadata mapping.
+- Embeddings are L2-normalized and written directly into LMDB under the profile name.
+- Query compares the captured embedding with each stored vector using a cosine (dot product) similarity.
 
 ### Storage Layout
 
@@ -247,7 +232,6 @@ default_device=/dev/video0
 - LibTorch 2.8.0+ (CPU)
 - OpenCV 4.x (with objdetect module for Haar cascades)
 - OpenBLAS & LAPACK
-- FAISS (included as submodule)
 - LMDB (included as submodule)
 
 **Note**: For face detection, you may need to install OpenCV's data files:
@@ -270,7 +254,7 @@ Building the project also produces `pam_lxfu.so`, a PAM module that lets you plu
 - Add it to a service, e.g. `auth sufficient pam_lxfu.so device=/dev/video0 threshold=0.92`.
 - The module runs headless (no preview) and falls back to other PAM entries when the face database is empty or the match is below the threshold.
 - Optional module options mirror the CLI: `name=<profile>` to require a specific name (defaults to the PAM user) and `allow_all=true` to accept any enrolled profile.
-- Internally, both the CLI and PAM average the cosine similarities across all stored samples for each profile, so retries and threshold checks use the mean score rather than a single best vector.
+- The module compares the captured embedding directly against the stored LMDB profiles using cosine similarity.
 
 ## Development
 
@@ -282,19 +266,23 @@ Loading DINOv2 model on CPU...
 Loading/capturing face...
 Image loaded: 800x600
 Extracting face embedding...
-Embedding extracted: 1024 dimensions
-Loading existing FAISS index...
-Loaded index with 5 faces
-Face added to index with ID: 5
-Name 'nabeel' associated with face ID 5
-Index saved with 6 faces
+Embedding extracted: 384 dimensions
 
 ✓ Enrollment successful!
   Name: nabeel
-  Face ID: 5
-## Development
+  Embedding dimensions: 384
+  Total profiles: 1
 
-For development without system installation:
+$ ./build/bin/lxfu query face.jpg nabeel
+Loading DINOv2 model on CPU...
+Loading/capturing face...
+Image loaded: 800x600
+Extracting face embedding...
+
+✓ Face recognized!
+  Name: nabeel (requested)
+  Similarity: 98.12%
+````
 
 ```bash
 # Create local config
@@ -307,13 +295,12 @@ nano lxfu.conf.local
 
 # Run from build directory
 ./build/bin/lxfu enroll /dev/video0 test
-````
+```
 
 ## Data Storage
 
-- **FAISS Index**: `~/.lxfu/lxfu_faces.index` - stores embedding vectors
-- **LMDB Database**: `~/.lxfu/lxfu_metadata.db/` - stores ID → name mappings
-- Location is configurable via `db_path` in configuration file
+- **LMDB Directory**: `~/.lxfu/embeddings/` - stores normalized embeddings keyed by profile name
+- Location is configurable via `db_path` in the configuration file
 
 ## Technical Details
 
@@ -325,18 +312,9 @@ For face/image embeddings, **cosine similarity is superior to Euclidean distance
 - Invariant to embedding magnitude
 - Standard in computer vision (CLIP, DINOv2, FaceNet)
 
-### FAISS Index Type
-
-Uses `IndexFlatIP` (Inner Product) on L2-normalized vectors:
-
-- Exact search (no approximation)
-- Inner product on normalized vectors = cosine similarity
-- Similarity scores: 1.0 (identical) to -1.0 (opposite)
-
 ### Performance
 
 - **Embedding extraction**: ~50-200ms (CPU-dependent)
-- **FAISS search**: <1ms for thousands of faces
 - **LMDB lookup**: <0.1ms per query
 - **Total**: Real-time performance for face recognition
 
@@ -356,13 +334,12 @@ See [INSTALL.md](INSTALL.md) for common issues:
 - [ ] Batch enrollment from directories
 - [ ] REST API server mode
 - [ ] GPU acceleration support
-- [ ] Advanced FAISS indexes (IVF, PQ) for millions of faces
+- [ ] Improve large-scale search options for millions of faces
 - [ ] Face management commands (list, delete, update)
 
 ## License
 
 See individual component licenses:
 
-- FAISS: MIT
 - LMDB: OpenLDAP Public License
 - DINOv2: Apache 2.0
