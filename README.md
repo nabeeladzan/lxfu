@@ -147,6 +147,7 @@ Searching for similar faces...
 - When a display server is missing or OpenCV cannot open a window, LXFU logs a warning and continues with an instant capture so scripts do not break.
 - The same fallback applies to image previews, making `--preview` safe to use across desktops, servers, SSH sessions, CI jobs, and containers.
 - Preview overlays face bounding boxes when the Haar cascade is available, providing immediate feedback before capture.
+- For camera sources the CLI keeps capturing until it detects a face (or you cancel), helping mitigate IR flicker or poor first frames.
 
 ## Configuration File
 

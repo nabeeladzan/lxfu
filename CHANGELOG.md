@@ -45,6 +45,7 @@
 - Default profile name is `default`; running `lxfu enroll` without arguments captures from the configured default device.
 - `--all` on `query` allows matching any enrolled name, while `--name` restricts to a specific profile.
 - Query paths now average cosine scores across all stored samples per profile rather than using only the single best embedding.
+- Camera-based enroll/query now keep capturing frames until a face is detected (or the user cancels), improving robustness for flickering IR lighting.
 - New management commands:
   - `lxfu list` summarises enrolled profiles and their embedding IDs.
   - `lxfu delete --name/--id` removes specific entries (rebuilding the FAISS index).

@@ -81,6 +81,39 @@ std::string require_value(const std::vector<std::string>& args, size_t& i, const
 
 } // namespace
 
+bool is_camera_source(const std::string& source) {
+    return source.rfind("/dev/video", 0) == 0;
+}
+
+bool face_detected(const cv::Mat& original, const cv::Mat& cropped) {
+    return cropped.cols != original.cols || cropped.rows != original.rows;
+}
+
+cv::Mat capture_with_retry(const std::string& source, bool show_preview, cv::Mat& raw_image) {
+    bool camera = is_camera_source(source);
+    bool detector_available = g_face_detector.is_initialized();
+
+    int attempt = 0;
+    while (true) {
+        ++attempt;
+        raw_image = load_image_or_capture(source, show_preview);
+
+        if (!camera || !detector_available) {
+            return g_face_detector.crop_to_face(raw_image);
+        }
+
+        cv::Mat face_image = g_face_detector.crop_to_face(raw_image);
+        if (face_detected(raw_image, face_image)) {
+            if (attempt > 1) {
+                std::cout << "✓ Face detected after " << attempt << " attempts" << std::endl;
+            }
+            return face_image;
+        }
+
+        std::cout << "⚠ No face detected; retrying capture (Ctrl+C to abort)..." << std::endl;
+    }
+}
+
 std::string join_ids(const std::vector<int64_t>& ids) {
     if (ids.empty()) {
         return "-";
@@ -263,13 +296,11 @@ void enroll(const EnrollOptions& opts) {
         std::string model_path = g_config.get("model_path");
         FaceEngine engine(model_path);
         
-        // Load or capture image
+        // Load or capture image (retrying for camera sources until a face is detected)
         std::cout << "Loading/capturing face..." << std::endl;
-        cv::Mat image = load_image_or_capture(opts.source, opts.show_preview);
+        cv::Mat image;
+        cv::Mat face_image = capture_with_retry(opts.source, opts.show_preview, image);
         std::cout << "Image loaded: " << image.cols << "x" << image.rows << std::endl;
-        
-        // Detect and crop to face
-        cv::Mat face_image = g_face_detector.crop_to_face(image);
         
         // Extract embedding
         std::cout << "Extracting face embedding..." << std::endl;
@@ -310,13 +341,11 @@ void query(const QueryOptions& opts) {
         std::string model_path = g_config.get("model_path");
         FaceEngine engine(model_path);
         
-        // Load or capture image
+        // Load or capture image (retrying for cameras until a face is detected)
         std::cout << "Loading/capturing face..." << std::endl;
-        cv::Mat image = load_image_or_capture(opts.source, opts.show_preview);
+        cv::Mat image;
+        cv::Mat face_image = capture_with_retry(opts.source, opts.show_preview, image);
         std::cout << "Image loaded: " << image.cols << "x" << image.rows << std::endl;
-        
-        // Detect and crop to face
-        cv::Mat face_image = g_face_detector.crop_to_face(image);
         
         // Extract embedding
         std::cout << "Extracting face embedding..." << std::endl;
