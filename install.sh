@@ -22,6 +22,18 @@ fi
 echo "Installing to ${INSTALL_PREFIX}..."
 cmake --install "${BUILD_DIR}" --config "${CONFIG}" "$@"
 
+CONFIG_PATH="${INSTALL_PREFIX}/etc/lxfu/lxfu.conf"
+if [[ "${INSTALL_PREFIX}" == "/usr" ]]; then
+    CONFIG_PATH="/etc/lxfu/lxfu.conf"
+fi
+
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+    install -D -m 0644 lxfu.conf "${CONFIG_PATH}"
+    echo "Installed default config to ${CONFIG_PATH}"
+else
+    echo "Config already exists at ${CONFIG_PATH}; leaving untouched"
+fi
+
 # Ensure runtime linker can locate bundled Torch libs for PAM
 if [[ "${INSTALL_PREFIX}" == "/usr" ]]; then
     LIBDIR=$(grep -E '^CMAKE_INSTALL_LIBDIR:PATH=' "${BUILD_DIR}/CMakeCache.txt" 2>/dev/null | head -n1 | cut -d'=' -f2)
