@@ -66,13 +66,18 @@ find_library(PAM_LIB pam REQUIRED)
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-# Build LMDB as a static library
-add_library(lmdb STATIC 
-    lmdb/mdb.c
-    lmdb/midl.c
+find_path(LMDB_INCLUDE_DIR NAMES lmdb.h PATH_SUFFIXES lmdb)
+find_library(LMDB_LIBRARY NAMES lmdb)
+
+if(NOT LMDB_INCLUDE_DIR OR NOT LMDB_LIBRARY)
+  message(FATAL_ERROR "LMDB development files not found. Install liblmdb-dev or equivalent.")
+endif()
+
+add_library(lmdb UNKNOWN IMPORTED)
+set_target_properties(lmdb PROPERTIES
+  IMPORTED_LOCATION "${LMDB_LIBRARY}"
+  INTERFACE_INCLUDE_DIRECTORIES "${LMDB_INCLUDE_DIR}"
 )
-target_include_directories(lmdb PUBLIC lmdb)
-set_target_properties(lmdb PROPERTIES LINKER_LANGUAGE C)
 
 # Main LXFU executable
 add_executable(lxfu src/lxfu.cpp)
