@@ -345,46 +345,68 @@ void query(const QueryOptions& opts) {
         std::string lmdb_path = g_config.get_lmdb_path();
         LMDBStore store(lmdb_path, LMDBStore::Mode::ReadOnly);
 
-        bool require_specific = !opts.match_all;
-        std::string desired_name = opts.target_name.value_or("default");
-
-        std::optional<FaceEngine::SearchResult> chosen;
-        std::string matched_name;
-
+        std::unordered_map<std::string, std::vector<FaceEngine::SearchResult>> grouped;
         for (const auto& candidate : candidates) {
             std::string stored = store.get_name(candidate.id);
-            if (stored.empty()) {
-                continue;
+            if (!stored.empty()) {
+                grouped[stored].push_back(candidate);
             }
-            if (require_specific && stored != desired_name) {
-                continue;
-            }
-            chosen = candidate;
-            matched_name = stored;
-            break;
         }
 
-        if (!chosen) {
-            if (require_specific) {
-                std::cout << "\n⚠ No match found for name '" << desired_name << "'" << std::endl;
-            } else {
-                std::cout << "\n⚠ No match found" << std::endl;
-            }
+        if (grouped.empty()) {
+            std::cout << "\n⚠ No match found" << std::endl;
             return;
         }
 
-        float similarity_percentage = chosen->similarity * 100.0f;
+        auto compute_average = [](const std::vector<FaceEngine::SearchResult>& results) {
+            if (results.empty()) {
+                return 0.0f;
+            }
+            float sum = 0.0f;
+            for (const auto& r : results) {
+                sum += r.similarity;
+            }
+            return sum / results.size();
+        };
+
+        if (!opts.match_all) {
+            std::string desired_name = opts.target_name.value();
+            auto it = grouped.find(desired_name);
+            if (it == grouped.end()) {
+                std::cout << "\n⚠ No match found for name '" << desired_name << "'" << std::endl;
+                return;
+            }
+            float average = compute_average(it->second);
+            float percentage = average * 100.0f;
+            std::cout << "\n✓ Face recognized!" << std::endl;
+            std::cout << "  Name: " << desired_name << " (requested)" << std::endl;
+            std::cout << "  Average similarity: " << std::fixed << std::setprecision(2) << percentage << "%" << std::endl;
+            std::cout << "  Samples considered: " << it->second.size() << std::endl;
+            return;
+        }
+
+        std::string best_name;
+        float best_average = -2.0f;
+        size_t best_count = 0;
+        for (const auto& [name, results] : grouped) {
+            float average = compute_average(results);
+            if (average > best_average) {
+                best_average = average;
+                best_name = name;
+                best_count = results.size();
+            }
+        }
+
+        if (best_name.empty()) {
+            std::cout << "\n⚠ No match found" << std::endl;
+            return;
+        }
 
         std::cout << "\n✓ Face recognized!" << std::endl;
-        if (opts.match_all) {
-            std::cout << "  Name: " << matched_name << std::endl;
-        } else {
-            std::cout << "  Name: " << matched_name << " (requested)" << std::endl;
-        }
-        std::cout << "  Similarity: " << std::fixed << std::setprecision(2)
-                  << similarity_percentage << "%" << std::endl;
-        std::cout << "  Face ID: " << chosen->id << std::endl;
-        
+        std::cout << "  Name: " << best_name << std::endl;
+        std::cout << "  Average similarity: " << std::fixed << std::setprecision(2) << (best_average * 100.0f) << "%" << std::endl;
+        std::cout << "  Samples considered: " << best_count << std::endl;
+
     } catch (const std::exception& e) {
         std::cerr << "Error during query: " << e.what() << std::endl;
         throw;
