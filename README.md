@@ -61,21 +61,24 @@ Command-line arguments always override configuration.
 **Headless mode (default):**
 
 ```bash
-# From webcam - captures immediately
-lxfu enroll /dev/video0 alice
+# Uses default camera (/dev/video0) and stores under name "default"
+lxfu enroll
 
-# From image file
-lxfu enroll photo.jpg bob
+# Explicit device/name selection
+lxfu enroll --device /dev/video0 --name nabeel
+
+# Image enrollment (legacy positional arguments still supported)
+lxfu enroll face.jpg bob
 ```
 
 **Preview mode (with GUI confirmation):**
 
 ```bash
 # Show preview window, press SPACE to capture, ESC to cancel
-lxfu --preview enroll /dev/video0 alice
+lxfu --preview enroll --device /dev/video0 --name nabeel
 
 # Preview image before processing
-lxfu --preview enroll photo.jpg bob
+lxfu --preview enroll --file photo.jpg --name bob
 
 # Note: On headless systems (no DISPLAY), automatically falls back to instant mode
 ```
@@ -85,30 +88,39 @@ lxfu --preview enroll photo.jpg bob
 **Headless mode (default):**
 
 ```bash
-# From webcam - captures immediately
-lxfu query /dev/video0
+# Query the default profile using the default device
+lxfu query
 
-# From image file
-lxfu query unknown.jpg
+# Require a specific profile name
+lxfu query --device /dev/video0 --name nabeel
+
+# Accept any enrolled profile
+lxfu query --device /dev/video0 --all
 ```
 
 **Preview mode (with GUI confirmation):**
 
 ```bash
 # Show preview window before query
-lxfu --preview query /dev/video0
+lxfu --preview query --device /dev/video0 --name nabeel
 
 # Preview image before query
-lxfu --preview query unknown.jpg
+lxfu --preview query --file unknown.jpg --all
 ```
 
 ### Output Example
 
 ```
 Loaded config from /etc/lxfu/lxfu.conf
-Capturing from device: /dev/video0
-Embedding extracted: 384 dimensions
-✓ Match found: alice (94.23% confidence)
+Loading/capturing face...
+Image loaded: 640x480
+Extracting face embedding...
+Searching for similar faces...
+
+✓ Face recognized!
+  Name: alice (requested)
+  Similarity: 94.23%
+  Face ID: 0
 ```
 
 ### Preview Mode & Headless Fallback
@@ -238,6 +250,7 @@ Building the project also produces `pam_lxfu.so`, a PAM module that lets you plu
 - Install with `sudo cmake --build build --target install` to drop the module in `/usr/lib/security`.
 - Add it to a service, e.g. `auth sufficient pam_lxfu.so device=/dev/video0 threshold=0.92`.
 - The module runs headless (no preview) and falls back to other PAM entries when the face database is empty or the match is below the threshold.
+- Optional module options mirror the CLI: `name=<profile>` to require a specific name (defaults to the PAM user) and `allow_all=true` to accept any enrolled profile.
 
 ## Development
 

@@ -26,8 +26,10 @@ namespace {
 struct ModuleOptions {
     std::optional<std::string> source_path;
     std::optional<std::string> device_path;
+    std::optional<std::string> target_name;
     double threshold = 0.90;
     bool debug = false;
+    bool allow_all = false;
 };
 
 ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
@@ -50,6 +52,12 @@ ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
             opts.source_path = value;
         } else if (key == "device") {
             opts.device_path = value;
+        } else if (key == "name") {
+            opts.target_name = value;
+        } else if (key == "allow_all" || key == "all") {
+            std::string lowered = value;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            opts.allow_all = (lowered == "1" || lowered == "true" || lowered == "yes");
         } else if (key == "threshold") {
             try {
                 opts.threshold = std::stod(value);
@@ -164,33 +172,56 @@ int match_user_with_face(pam_handle_t* pamh, const std::string& username, const 
         return PAM_AUTHINFO_UNAVAIL;
     }
 
-    auto result = engine.search(embedding);
-    if (result.id < 0) {
+    int64_t index_size = static_cast<int64_t>(engine.get_index_size());
+    int k = static_cast<int>(std::min<int64_t>(index_size, 10));
+    auto candidates = engine.search_many(embedding, k);
+    if (candidates.empty()) {
         pam_syslog(pamh, LOG_WARNING, "pam_lxfu: no similar face found");
         return PAM_AUTH_ERR;
     }
 
-    if (result.similarity < static_cast<float>(opts.threshold)) {
-        pam_syslog(pamh, LOG_INFO, "pam_lxfu: similarity %.2f below threshold %.2f", result.similarity, opts.threshold);
-        return PAM_AUTH_ERR;
-    }
+    std::string desired_name = opts.allow_all ? std::string() : opts.target_name.value_or(username);
 
     LMDBStore store(config.get_lmdb_path(), LMDBStore::Mode::ReadOnly);
-    std::string stored_name = store.get_name(result.id);
 
-    if (stored_name.empty()) {
-        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: face id %ld has no associated username", static_cast<long>(result.id));
+    std::optional<FaceEngine::SearchResult> chosen;
+    std::string matched_name;
+
+    for (const auto& candidate : candidates) {
+        std::string stored_name = store.get_name(candidate.id);
+        if (stored_name.empty()) {
+            continue;
+        }
+        if (!opts.allow_all && stored_name != desired_name) {
+            continue;
+        }
+        chosen = candidate;
+        matched_name = stored_name;
+        break;
+    }
+
+    if (!chosen) {
+        if (opts.allow_all) {
+            pam_syslog(pamh, LOG_INFO, "pam_lxfu: best matches do not satisfy allow_all criteria");
+        } else {
+            pam_syslog(pamh, LOG_INFO, "pam_lxfu: no match for requested name '%s'", desired_name.c_str());
+        }
         return PAM_AUTH_ERR;
     }
 
-    if (stored_name != username) {
-        pam_syslog(pamh, LOG_INFO, "pam_lxfu: best match '%s' does not match user '%s'", stored_name.c_str(), username.c_str());
+    if (chosen->similarity < static_cast<float>(opts.threshold)) {
+        pam_syslog(pamh, LOG_INFO, "pam_lxfu: similarity %.2f below threshold %.2f", chosen->similarity, opts.threshold);
+        return PAM_AUTH_ERR;
+    }
+
+    if (!opts.allow_all && matched_name != desired_name) {
+        pam_syslog(pamh, LOG_INFO, "pam_lxfu: matched name '%s' does not match requested '%s'", matched_name.c_str(), desired_name.c_str());
         return PAM_AUTH_ERR;
     }
 
     if (opts.debug) {
-        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: user '%s' matched with similarity %.2f (id %ld)",
-                   username.c_str(), result.similarity, static_cast<long>(result.id));
+        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: matched name '%s' with similarity %.2f (id %ld)",
+                   matched_name.c_str(), chosen->similarity, static_cast<long>(chosen->id));
     }
 
     return PAM_SUCCESS;
@@ -226,4 +257,3 @@ PAM_EXTERN int pam_sm_setcred(pam_handle_t*, int, int, const char**) {
 }
 
 } // extern "C"
-

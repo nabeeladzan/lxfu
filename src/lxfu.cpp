@@ -7,6 +7,9 @@
 #include <string>
 #include <filesystem>
 #include <iomanip>
+#include <optional>
+#include <initializer_list>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -17,17 +20,56 @@ FaceDetector g_face_detector;
 void print_usage(const char* program_name) {
     std::cout << "LXFU - Linux Face Utility\n\n";
     std::cout << "Usage:\n";
+    std::cout << "  " << program_name << " [--preview] enroll [--device PATH|--file PATH] [--name NAME]\n";
+    std::cout << "  " << program_name << " [--preview] query [--device PATH|--file PATH] [--name NAME|--all]\n\n";
+    std::cout << "Positional fallback (legacy):\n";
     std::cout << "  " << program_name << " [--preview] enroll <device|image_path> <name>\n";
-    std::cout << "  " << program_name << " [--preview] query <device|image_path>\n\n";
+    std::cout << "  " << program_name << " [--preview] query <device|image_path> [name]\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --preview    Show camera preview window (press SPACE to capture, ESC to cancel)\n\n";
+    std::cout << "  --preview       Show camera preview window (press SPACE to capture, ESC to cancel)\n";
+    std::cout << "  --device PATH   Capture from camera device (defaults to config setting)\n";
+    std::cout << "  --file PATH     Load from image file instead of a device\n";
+    std::cout << "  --name NAME     Specify profile name (defaults to 'default')\n";
+    std::cout << "  --all           Query mode: allow matches for any enrolled name\n\n";
     std::cout << "Examples:\n";
-    std::cout << "  " << program_name << " enroll /dev/video0 nabeel\n";
-    std::cout << "  " << program_name << " --preview enroll /dev/video0 nabeel\n";
-    std::cout << "  " << program_name << " enroll face.jpg john\n";
-    std::cout << "  " << program_name << " query /dev/video0\n";
-    std::cout << "  " << program_name << " --preview query unknown_face.jpg\n";
+    std::cout << "  " << program_name << " enroll --device /dev/video0 --name nabeel\n";
+    std::cout << "  " << program_name << " enroll face.jpg nabeel\n";
+    std::cout << "  " << program_name << " query --device /dev/video0 --name nabeel\n";
+    std::cout << "  " << program_name << " query --device /dev/video0 --all\n";
 }
+
+struct EnrollOptions {
+    std::string source;
+    std::string name;
+    bool show_preview{false};
+};
+
+struct QueryOptions {
+    std::string source;
+    std::optional<std::string> target_name;
+    bool match_all{false};
+    bool show_preview{false};
+};
+
+namespace {
+
+bool is_flag(const std::string& arg, const std::initializer_list<const char*>& names) {
+    for (const char* n : names) {
+        if (arg == n) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string require_value(const std::vector<std::string>& args, size_t& i, const char* flag) {
+    if (i + 1 >= args.size()) {
+        throw std::runtime_error(std::string("Missing value for ") + flag);
+    }
+    return args[++i];
+}
+
+} // namespace
 
 cv::Mat capture_from_device(const std::string& device_path, bool show_preview = false) {
     // Extract device number from path like /dev/video0
@@ -178,7 +220,7 @@ cv::Mat load_image_or_capture(const std::string& source, bool show_preview = fal
     return image;
 }
 
-void enroll(const std::string& source, const std::string& name, bool show_preview = false) {
+void enroll(const EnrollOptions& opts) {
     try {
         // Initialize face engine
         std::string model_path = g_config.get("model_path");
@@ -186,7 +228,7 @@ void enroll(const std::string& source, const std::string& name, bool show_previe
         
         // Load or capture image
         std::cout << "Loading/capturing face..." << std::endl;
-        cv::Mat image = load_image_or_capture(source, show_preview);
+        cv::Mat image = load_image_or_capture(opts.source, opts.show_preview);
         std::cout << "Image loaded: " << image.cols << "x" << image.rows << std::endl;
         
         // Detect and crop to face
@@ -208,14 +250,14 @@ void enroll(const std::string& source, const std::string& name, bool show_previe
         // Store name in LMDB
         std::string lmdb_path = g_config.get_lmdb_path();
         LMDBStore store(lmdb_path);
-        store.store_name(face_id, name);
-        std::cout << "Name '" << name << "' associated with face ID " << face_id << std::endl;
+        store.store_name(face_id, opts.name);
+        std::cout << "Name '" << opts.name << "' associated with face ID " << face_id << std::endl;
         
         // Save index
         engine.save_index(faiss_path);
         
         std::cout << "\n✓ Enrollment successful!" << std::endl;
-        std::cout << "  Name: " << name << std::endl;
+        std::cout << "  Name: " << opts.name << std::endl;
         std::cout << "  Face ID: " << face_id << std::endl;
         std::cout << "  Total faces in database: " << engine.get_index_size() << std::endl;
         
@@ -225,7 +267,7 @@ void enroll(const std::string& source, const std::string& name, bool show_previe
     }
 }
 
-void query(const std::string& source, bool show_preview = false) {
+void query(const QueryOptions& opts) {
     try {
         // Initialize face engine
         std::string model_path = g_config.get("model_path");
@@ -233,7 +275,7 @@ void query(const std::string& source, bool show_preview = false) {
         
         // Load or capture image
         std::cout << "Loading/capturing face..." << std::endl;
-        cv::Mat image = load_image_or_capture(source, show_preview);
+        cv::Mat image = load_image_or_capture(opts.source, opts.show_preview);
         std::cout << "Image loaded: " << image.cols << "x" << image.rows << std::endl;
         
         // Detect and crop to face
@@ -254,26 +296,57 @@ void query(const std::string& source, bool show_preview = false) {
         
         // Search for similar face
         std::cout << "Searching for similar faces..." << std::endl;
-        auto result = engine.search(embedding);
-        
-        if (result.id < 0) {
+        int64_t total = static_cast<int64_t>(engine.get_index_size());
+        int k = static_cast<int>(std::min<int64_t>(total, 10));
+        auto candidates = engine.search_many(embedding, k);
+
+        if (candidates.empty()) {
             std::cout << "\n⚠ No match found" << std::endl;
             return;
         }
-        
-        // Get name from LMDB
+
         std::string lmdb_path = g_config.get_lmdb_path();
         LMDBStore store(lmdb_path, LMDBStore::Mode::ReadOnly);
-        std::string name = store.get_name(result.id);
-        
-        // Convert similarity to percentage
-        float similarity_percentage = result.similarity * 100.0f;
-        
+
+        bool require_specific = !opts.match_all;
+        std::string desired_name = opts.target_name.value_or("default");
+
+        std::optional<FaceEngine::SearchResult> chosen;
+        std::string matched_name;
+
+        for (const auto& candidate : candidates) {
+            std::string stored = store.get_name(candidate.id);
+            if (stored.empty()) {
+                continue;
+            }
+            if (require_specific && stored != desired_name) {
+                continue;
+            }
+            chosen = candidate;
+            matched_name = stored;
+            break;
+        }
+
+        if (!chosen) {
+            if (require_specific) {
+                std::cout << "\n⚠ No match found for name '" << desired_name << "'" << std::endl;
+            } else {
+                std::cout << "\n⚠ No match found" << std::endl;
+            }
+            return;
+        }
+
+        float similarity_percentage = chosen->similarity * 100.0f;
+
         std::cout << "\n✓ Face recognized!" << std::endl;
-        std::cout << "  Name: " << name << std::endl;
-        std::cout << "  Similarity: " << std::fixed << std::setprecision(2) 
+        if (opts.match_all) {
+            std::cout << "  Name: " << matched_name << std::endl;
+        } else {
+            std::cout << "  Name: " << matched_name << " (requested)" << std::endl;
+        }
+        std::cout << "  Similarity: " << std::fixed << std::setprecision(2)
                   << similarity_percentage << "%" << std::endl;
-        std::cout << "  Face ID: " << result.id << std::endl;
+        std::cout << "  Face ID: " << chosen->id << std::endl;
         
     } catch (const std::exception& e) {
         std::cerr << "Error during query: " << e.what() << std::endl;
@@ -306,36 +379,127 @@ int main(int argc, char* argv[]) {
         }
         
         std::string command = argv[arg_offset];
-        
+
+        std::vector<std::string> args;
+        for (int i = arg_offset + 1; i < argc; ++i) {
+            args.emplace_back(argv[i]);
+        }
+
         if (command == "enroll") {
-            if (argc != arg_offset + 3) {
-                std::cerr << "Error: enroll requires <device|image_path> and <name>\n";
+            try {
+                EnrollOptions options;
+                options.show_preview = show_preview;
+                options.source = g_config.get("default_device", "/dev/video0");
+                options.name = "default";
+
+                bool source_from_flag = false;
+                bool name_from_flag = false;
+                std::vector<std::string> positional;
+
+                for (size_t i = 0; i < args.size(); ++i) {
+                    const std::string& arg = args[i];
+                    if (is_flag(arg, {"--name"})) {
+                        options.name = require_value(args, i, "--name");
+                        name_from_flag = true;
+                    } else if (is_flag(arg, {"--device"})) {
+                        options.source = require_value(args, i, "--device");
+                        source_from_flag = true;
+                    } else if (is_flag(arg, {"--file", "--source"})) {
+                        options.source = require_value(args, i, "--file");
+                        source_from_flag = true;
+                    } else if (!arg.empty() && arg[0] == '-') {
+                        throw std::runtime_error("Unknown enroll option: " + arg);
+                    } else {
+                        positional.push_back(arg);
+                    }
+                }
+
+                if (!positional.empty()) {
+                    if (!source_from_flag) {
+                        options.source = positional[0];
+                        source_from_flag = true;
+                    }
+                    if (positional.size() > 1 && !name_from_flag) {
+                        options.name = positional[1];
+                        name_from_flag = true;
+                    }
+                }
+
+                if (options.source.empty()) {
+                    throw std::runtime_error("No capture source provided");
+                }
+
+                enroll(options);
+            } catch (const std::exception& ex) {
+                std::cerr << "Error: " << ex.what() << "\n";
                 print_usage(argv[0]);
                 return 1;
             }
-            
-            std::string source = argv[arg_offset + 1];
-            std::string name = argv[arg_offset + 2];
-            
-            enroll(source, name, show_preview);
-            
+
         } else if (command == "query") {
-            if (argc != arg_offset + 2) {
-                std::cerr << "Error: query requires <device|image_path>\n";
+            try {
+                QueryOptions options;
+                options.show_preview = show_preview;
+                options.source = g_config.get("default_device", "/dev/video0");
+                options.match_all = false;
+
+                bool source_from_flag = false;
+                bool name_from_flag = false;
+                std::vector<std::string> positional;
+
+                for (size_t i = 0; i < args.size(); ++i) {
+                    const std::string& arg = args[i];
+                    if (is_flag(arg, {"--name"})) {
+                        options.target_name = require_value(args, i, "--name");
+                        name_from_flag = true;
+                    } else if (is_flag(arg, {"--device"})) {
+                        options.source = require_value(args, i, "--device");
+                        source_from_flag = true;
+                    } else if (is_flag(arg, {"--file", "--source"})) {
+                        options.source = require_value(args, i, "--file");
+                        source_from_flag = true;
+                    } else if (arg == "--all") {
+                        options.match_all = true;
+                        options.target_name.reset();
+                    } else if (!arg.empty() && arg[0] == '-') {
+                        throw std::runtime_error("Unknown query option: " + arg);
+                    } else {
+                        positional.push_back(arg);
+                    }
+                }
+
+                if (!positional.empty()) {
+                    if (!source_from_flag) {
+                        options.source = positional[0];
+                        source_from_flag = true;
+                    }
+                    if (positional.size() > 1 && !name_from_flag && !options.match_all) {
+                        options.target_name = positional[1];
+                        name_from_flag = true;
+                    }
+                }
+
+                if (!options.match_all) {
+                    options.target_name = options.target_name.value_or("default");
+                }
+
+                if (options.source.empty()) {
+                    throw std::runtime_error("No capture source provided");
+                }
+
+                query(options);
+            } catch (const std::exception& ex) {
+                std::cerr << "Error: " << ex.what() << "\n";
                 print_usage(argv[0]);
                 return 1;
             }
-            
-            std::string source = argv[arg_offset + 1];
-            
-            query(source, show_preview);
-            
+
         } else {
             std::cerr << "Error: Unknown command '" << command << "'\n";
             print_usage(argv[0]);
             return 1;
         }
-        
+
         return 0;
         
     } catch (const std::exception& e) {

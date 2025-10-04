@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 #include <filesystem>
+#include <algorithm>
+#include <vector>
 
 class FaceEngine {
 private:
@@ -139,16 +141,30 @@ public:
     };
     
     SearchResult search(const std::vector<float>& embedding, int k = 1) {
-        if (!index_ || index_->ntotal == 0) {
+        auto results = search_many(embedding, k);
+        if (results.empty()) {
             return {-1, 0.0f};
         }
-        
-        std::vector<faiss::idx_t> labels(k);
-        std::vector<float> similarities(k);
-        
-        index_->search(1, embedding.data(), k, similarities.data(), labels.data());
-        
-        return {labels[0], similarities[0]};
+        return results.front();
+    }
+
+    std::vector<SearchResult> search_many(const std::vector<float>& embedding, int k) {
+        if (!index_ || index_->ntotal == 0 || k <= 0) {
+            return {};
+        }
+
+        int64_t limit = std::min<int64_t>(index_->ntotal, k);
+        std::vector<faiss::idx_t> labels(limit);
+        std::vector<float> similarities(limit);
+
+        index_->search(1, embedding.data(), limit, similarities.data(), labels.data());
+
+        std::vector<SearchResult> results;
+        results.reserve(limit);
+        for (int64_t i = 0; i < limit; ++i) {
+            results.push_back({labels[i], similarities[i]});
+        }
+        return results;
     }
     
     // Save index to disk
