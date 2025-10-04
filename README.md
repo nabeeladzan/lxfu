@@ -26,22 +26,30 @@ See [INSTALL.md](INSTALL.md) for complete installation instructions.
 ### Quick Install
 
 ```bash
-# Build
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
+# Build and install (installs to /usr with config in /etc)
+./build.sh
+sudo ./install.sh
 
-# Install system-wide
+# Or manually with CMake
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=/usr ..
+make -j$(nproc)
 sudo make install
 ```
 
 ### File Locations
 
 ```
-/usr/local/bin/lxfu              # Executable
+/usr/bin/lxfu                    # Executable
 /usr/share/lxfu/dino.pt          # Model file
 /etc/lxfu/lxfu.conf              # System config
 ~/.lxfu/                         # User databases
+```
+
+**Note:** To install to `/usr/local` instead:
+```bash
+INSTALL_PREFIX=/usr/local ./build.sh
+sudo INSTALL_PREFIX=/usr/local ./install.sh
 ```
 
 ## Usage
@@ -51,8 +59,7 @@ sudo make install
 LXFU reads configuration from:
 
 1. `/etc/lxfu/lxfu.conf` (system-wide)
-2. `~/.config/lxfu/lxfu.conf` (user-specific, overrides system)
-3. `./lxfu.conf` (development mode)
+2. `./lxfu.conf` (development mode)
 
 Command-line arguments always override configuration.
 

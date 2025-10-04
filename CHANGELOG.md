@@ -15,7 +15,7 @@
 
 ### Configuration System
 
-- **Configuration file support**: LXFU now reads from `/etc/lxfu/lxfu.conf` (system), `~/.config/lxfu/lxfu.conf` (user), or `./lxfu.conf` (development)
+- **Configuration file support**: LXFU now reads from `/etc/lxfu/lxfu.conf` (system) or `./lxfu.conf` (development)
 - **Standard Linux paths**: Model at `/usr/share/lxfu/dino.pt`, database at `~/.lxfu/`
 - **Configurable options**:
   - `model_path` - DINOv2 model location
@@ -78,8 +78,7 @@ lxfu --preview query /dev/video0          # Show preview before query
 ```
 /etc/lxfu/lxfu.conf              # System configuration
 /usr/share/lxfu/dino.pt          # Model file
-/usr/local/bin/lxfu              # Executable
-~/.config/lxfu/lxfu.conf         # User configuration (optional)
+/usr/bin/lxfu                    # Executable
 ~/.lxfu/                         # User databases
   └── embeddings/                # LMDB environment holding profile vectors
 ```
