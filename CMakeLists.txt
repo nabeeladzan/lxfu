@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
-project(dinov3_demo LANGUAGES C CXX)
+project(lxfu LANGUAGES C CXX)
+
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +61,8 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui o
 
 find_library(PAM_LIB pam REQUIRED)
 
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Add FAISS subdirectory (CPU only)
 set(FAISS_ENABLE_GPU OFF CACHE BOOL "Disable GPU support")
 set(FAISS_ENABLE_PYTHON OFF CACHE BOOL "Disable Python bindings")
@@ -76,7 +80,7 @@ set_target_properties(lmdb PROPERTIES LINKER_LANGUAGE C)
 
 # Main LXFU executable
 add_executable(lxfu src/lxfu.cpp)
-target_link_libraries(lxfu PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} faiss lmdb pthread)
+target_link_libraries(lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} faiss lmdb pthread)
 target_include_directories(lxfu PRIVATE src)
 target_compile_features(lxfu PRIVATE cxx_std_17)
 
@@ -86,7 +90,7 @@ target_link_libraries(dinov3_demo PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} fa
 target_compile_features(dinov3_demo PRIVATE cxx_std_17)
 
 add_library(pam_lxfu MODULE src/pam_lxfu.cpp)
-target_link_libraries(pam_lxfu PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} faiss lmdb pthread ${PAM_LIB})
+target_link_libraries(pam_lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} faiss lmdb pthread ${PAM_LIB})
 target_include_directories(pam_lxfu PRIVATE src)
 target_compile_features(pam_lxfu PRIVATE cxx_std_17)
 set_target_properties(pam_lxfu PROPERTIES PREFIX "" SUFFIX ".so")
@@ -94,11 +98,37 @@ set_target_properties(pam_lxfu PROPERTIES PREFIX "" SUFFIX ".so")
 set_property(TARGET lxfu PROPERTY RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set_property(TARGET dinov3_demo PROPERTY RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+set(LXFU_INSTALL_LIB_SUBDIR "${CMAKE_INSTALL_LIBDIR}/lxfu")
+set(LXFU_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/lxfu")
+
+foreach(target lxfu pam_lxfu)
+  set_target_properties(${target} PROPERTIES
+    INSTALL_RPATH "${LXFU_INSTALL_RPATH}"
+  )
+endforeach()
+
+set(_torch_candidate_dirs
+  "${CMAKE_SOURCE_DIR}/libtorch/lib"
+  "${CMAKE_SOURCE_DIR}/libtorch/libtorch/lib"
+)
+foreach(_candidate IN LISTS _torch_candidate_dirs)
+  if(EXISTS "${_candidate}")
+    install(DIRECTORY "${_candidate}/"
+            DESTINATION "${LXFU_INSTALL_LIB_SUBDIR}"
+            FILES_MATCHING
+            PATTERN "*.so"
+            PATTERN "*.so.*"
+            PATTERN "*.dylib"
+            PATTERN "*.dll")
+    break()
+  endif()
+endforeach()
+
 # Libtorch binaries are all built with position independent code already.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 # Install rules
-install(TARGETS lxfu DESTINATION bin)
-install(TARGETS pam_lxfu DESTINATION /usr/lib/security)
-install(FILES lxfu.conf DESTINATION /etc/lxfu)
-install(FILES dino.pt DESTINATION /usr/share/lxfu)
+install(TARGETS lxfu DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS pam_lxfu DESTINATION "${CMAKE_INSTALL_LIBDIR}/security")
+install(FILES lxfu.conf DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/lxfu")
+install(FILES dino.pt DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/lxfu")
