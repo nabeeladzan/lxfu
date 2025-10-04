@@ -10,6 +10,10 @@
 #include <optional>
 #include <initializer_list>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <sstream>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -21,7 +25,10 @@ void print_usage(const char* program_name) {
     std::cout << "LXFU - Linux Face Utility\n\n";
     std::cout << "Usage:\n";
     std::cout << "  " << program_name << " [--preview] enroll [--device PATH|--file PATH] [--name NAME]\n";
-    std::cout << "  " << program_name << " [--preview] query [--device PATH|--file PATH] [--name NAME|--all]\n\n";
+    std::cout << "  " << program_name << " [--preview] query [--device PATH|--file PATH] [--name NAME|--all]\n";
+    std::cout << "  " << program_name << " list\n";
+    std::cout << "  " << program_name << " delete (--name NAME | --id ID) [--confirm]\n";
+    std::cout << "  " << program_name << " clear [--confirm]\n\n";
     std::cout << "Positional fallback (legacy):\n";
     std::cout << "  " << program_name << " [--preview] enroll <device|image_path> <name>\n";
     std::cout << "  " << program_name << " [--preview] query <device|image_path> [name]\n\n";
@@ -36,6 +43,9 @@ void print_usage(const char* program_name) {
     std::cout << "  " << program_name << " enroll face.jpg nabeel\n";
     std::cout << "  " << program_name << " query --device /dev/video0 --name nabeel\n";
     std::cout << "  " << program_name << " query --device /dev/video0 --all\n";
+    std::cout << "  " << program_name << " list\n";
+    std::cout << "  " << program_name << " delete --name nabeel --confirm\n";
+    std::cout << "  " << program_name << " clear --confirm\n";
 }
 
 struct EnrollOptions {
@@ -70,6 +80,33 @@ std::string require_value(const std::vector<std::string>& args, size_t& i, const
 }
 
 } // namespace
+
+std::string join_ids(const std::vector<int64_t>& ids) {
+    if (ids.empty()) {
+        return "-";
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (i != 0) {
+            oss << ", ";
+        }
+        oss << ids[i];
+    }
+    return oss.str();
+}
+
+bool confirm_action(bool auto_confirm, const std::string& prompt) {
+    if (auto_confirm) {
+        return true;
+    }
+    std::cout << prompt << " Type 'yes' to continue: ";
+    std::cout.flush();
+    std::string response;
+    if (!std::getline(std::cin, response)) {
+        return false;
+    }
+    return response == "yes";
+}
 
 cv::Mat capture_from_device(const std::string& device_path, bool show_preview = false) {
     // Extract device number from path like /dev/video0
@@ -354,6 +391,270 @@ void query(const QueryOptions& opts) {
     }
 }
 
+bool list_profiles() {
+    try {
+        std::string lmdb_path = g_config.get_lmdb_path();
+        if (!std::filesystem::exists(lmdb_path)) {
+            std::cout << "No faces enrolled." << std::endl;
+            return true;
+        }
+
+        LMDBStore store(lmdb_path, LMDBStore::Mode::ReadOnly);
+        auto entries = store.get_all_entries();
+
+        if (entries.empty()) {
+            std::cout << "No faces enrolled." << std::endl;
+            return true;
+        }
+
+        std::unordered_map<std::string, std::vector<int64_t>> grouped;
+        for (const auto& entry : entries) {
+            grouped[entry.second].push_back(entry.first);
+        }
+
+        std::cout << std::left << std::setw(24) << "Name" << std::setw(8) << "Count" << "IDs" << std::endl;
+        std::cout << std::string(60, '-') << std::endl;
+
+        std::vector<std::pair<std::string, std::vector<int64_t>>> ordered(grouped.begin(), grouped.end());
+        std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+
+        for (auto& group : ordered) {
+            const std::string& name = group.first.empty() ? std::string("<unnamed>") : group.first;
+            const auto& ids = group.second;
+            std::cout << std::left << std::setw(24) << name
+                      << std::setw(8) << ids.size()
+                      << join_ids(ids) << std::endl;
+        }
+
+        std::cout << "\nTotal faces: " << entries.size() << std::endl;
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error while listing profiles: " << ex.what() << std::endl;
+        return false;
+    }
+    return false;
+}
+
+bool delete_profiles(const std::vector<std::string>& args) {
+    try {
+        bool confirm_flag = false;
+        std::optional<std::string> target_name;
+        std::optional<int64_t> target_id;
+        std::vector<std::string> positional;
+
+        for (size_t i = 0; i < args.size(); ++i) {
+            const std::string& arg = args[i];
+            if (arg == "--confirm") {
+                confirm_flag = true;
+            } else if (is_flag(arg, {"--name"})) {
+                target_name = require_value(args, i, "--name");
+            } else if (is_flag(arg, {"--id"})) {
+                std::string value = require_value(args, i, "--id");
+                try {
+                    target_id = std::stoll(value);
+                } catch (const std::exception&) {
+                    throw std::runtime_error("Invalid value for --id: " + value);
+                }
+            } else if (!arg.empty() && arg[0] == '-') {
+                throw std::runtime_error("Unknown delete option: " + arg);
+            } else {
+                positional.push_back(arg);
+            }
+        }
+
+        if (!positional.empty()) {
+            if (!target_name && !target_id) {
+                // Treat first positional argument as name for convenience
+                target_name = positional[0];
+            } else {
+                throw std::runtime_error("Unexpected positional argument: " + positional[0]);
+            }
+        }
+
+        if ((target_name.has_value() && target_id.has_value()) || (!target_name && !target_id)) {
+            throw std::runtime_error("Specify exactly one of --name or --id for delete");
+        }
+
+        std::string lmdb_path = g_config.get_lmdb_path();
+        if (!std::filesystem::exists(lmdb_path)) {
+            std::cout << "No faces enrolled." << std::endl;
+            return true;
+        }
+
+        LMDBStore store(lmdb_path, LMDBStore::Mode::ReadWrite);
+        auto entries = store.get_all_entries();
+
+        if (entries.empty()) {
+            std::cout << "No faces enrolled." << std::endl;
+            return true;
+        }
+
+        std::unordered_set<int64_t> remove_ids;
+
+        if (target_id) {
+            auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) {
+                return entry.first == target_id.value();
+            });
+            if (it == entries.end()) {
+                std::cout << "No entry found with ID " << target_id.value() << std::endl;
+                return true;
+            }
+            remove_ids.insert(target_id.value());
+        } else if (target_name) {
+            for (const auto& entry : entries) {
+                if (entry.second == target_name.value()) {
+                    remove_ids.insert(entry.first);
+                }
+            }
+            if (remove_ids.empty()) {
+                std::cout << "No entries found for name '" << target_name.value() << "'" << std::endl;
+                return true;
+            }
+        }
+
+        size_t remove_count = remove_ids.size();
+        if (remove_count == 0) {
+            std::cout << "Nothing to delete." << std::endl;
+            return true;
+        }
+
+        std::string prompt;
+        if (target_id) {
+            prompt = "This will delete face ID " + std::to_string(target_id.value()) + ".";
+        } else {
+            prompt = "This will delete " + std::to_string(remove_count) + " face(s) for name '" + target_name.value() + "'.";
+        }
+
+        if (!confirm_action(confirm_flag, prompt)) {
+            std::cout << "Deletion cancelled." << std::endl;
+            return true;
+        }
+
+        std::vector<std::pair<int64_t, std::string>> keep_entries;
+        keep_entries.reserve(entries.size() - remove_count);
+        for (const auto& entry : entries) {
+            if (remove_ids.count(entry.first) == 0) {
+                keep_entries.push_back(entry);
+            }
+        }
+
+        std::string faiss_path = g_config.get_faiss_index_path();
+
+        if (keep_entries.empty()) {
+            store.clear();
+            if (std::filesystem::exists(faiss_path)) {
+                std::filesystem::remove(faiss_path);
+            }
+            std::cout << "All faces removed. Database is now empty." << std::endl;
+            return true;
+        }
+
+        if (!std::filesystem::exists(faiss_path)) {
+            throw std::runtime_error("FAISS index not found; cannot rebuild after deletion");
+        }
+
+        std::unique_ptr<faiss::Index> raw_index(faiss::read_index(faiss_path.c_str()));
+        auto* flat = dynamic_cast<faiss::IndexFlatIP*>(raw_index.get());
+        if (!flat) {
+            throw std::runtime_error("Expected IndexFlatIP for FAISS index");
+        }
+
+        int64_t dim = flat->d;
+        std::vector<float> buffer(dim);
+        std::vector<float> embeddings;
+        embeddings.reserve(static_cast<size_t>(keep_entries.size()) * dim);
+
+        for (const auto& entry : keep_entries) {
+            flat->reconstruct(entry.first, buffer.data());
+            embeddings.insert(embeddings.end(), buffer.begin(), buffer.end());
+        }
+
+        faiss::IndexFlatIP rebuilt(dim);
+        if (!embeddings.empty()) {
+            rebuilt.add(keep_entries.size(), embeddings.data());
+        }
+        faiss::write_index(&rebuilt, faiss_path.c_str());
+
+        store.clear();
+        int64_t new_id = 0;
+        for (const auto& entry : keep_entries) {
+            store.store_name(new_id++, entry.second);
+        }
+
+        std::cout << "Removed " << remove_count << " face(s). Remaining: " << keep_entries.size() << std::endl;
+        std::cout << "IDs have been reindexed sequentially; run 'lxfu list' to inspect." << std::endl;
+        return true;
+
+    } catch (const std::exception& ex) {
+        std::cerr << "Error while deleting faces: " << ex.what() << std::endl;
+        return false;
+    }
+    return false;
+}
+
+bool clear_profiles(const std::vector<std::string>& args) {
+    try {
+        bool confirm_flag = false;
+        for (const auto& arg : args) {
+            if (arg == "--confirm") {
+                confirm_flag = true;
+            } else if (!arg.empty() && arg[0] == '-') {
+                throw std::runtime_error("Unknown clear option: " + arg);
+            }
+        }
+
+        std::string lmdb_path = g_config.get_lmdb_path();
+        std::string faiss_path = g_config.get_faiss_index_path();
+
+        bool has_index = std::filesystem::exists(faiss_path);
+        size_t entry_count = 0;
+        bool has_lmdb = std::filesystem::exists(lmdb_path);
+
+        if (has_lmdb) {
+            try {
+                LMDBStore store(lmdb_path, LMDBStore::Mode::ReadOnly);
+                entry_count = store.size();
+            } catch (...) {
+                entry_count = 0;
+            }
+        }
+
+        if (!has_index && entry_count == 0) {
+            std::cout << "Nothing to clear." << std::endl;
+            return true;
+        }
+
+        std::string prompt = "This will remove all enrolled faces";
+        if (entry_count > 0) {
+            prompt += " (" + std::to_string(entry_count) + " entries)";
+        }
+        prompt += ".";
+
+        if (!confirm_action(confirm_flag, prompt)) {
+            std::cout << "Clear cancelled." << std::endl;
+            return true;
+        }
+
+        if (has_lmdb) {
+            LMDBStore store(lmdb_path, LMDBStore::Mode::ReadWrite);
+            store.clear();
+        }
+
+        if (has_index) {
+            std::filesystem::remove(faiss_path);
+        }
+
+        std::cout << "All facial data cleared." << std::endl;
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error while clearing database: " << ex.what() << std::endl;
+        return false;
+    }
+    return false;
+}
+
 int main(int argc, char* argv[]) {
     try {
         // Load configuration
@@ -377,12 +678,16 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         }
-        
+
         std::string command = argv[arg_offset];
 
         std::vector<std::string> args;
         for (int i = arg_offset + 1; i < argc; ++i) {
             args.emplace_back(argv[i]);
+        }
+
+        if (show_preview && command != "enroll" && command != "query") {
+            std::cout << "⚠ '--preview' flag is ignored for command '" << command << "'." << std::endl;
         }
 
         if (command == "enroll") {
@@ -495,9 +800,27 @@ int main(int argc, char* argv[]) {
             }
 
         } else {
-            std::cerr << "Error: Unknown command '" << command << "'\n";
-            print_usage(argv[0]);
-            return 1;
+            if (command == "list") {
+                if (!args.empty()) {
+                    std::cerr << "Error: 'list' does not accept additional arguments" << std::endl;
+                    return 1;
+                }
+                if (!list_profiles()) {
+                    return 1;
+                }
+            } else if (command == "delete") {
+                if (!delete_profiles(args)) {
+                    return 1;
+                }
+            } else if (command == "clear") {
+                if (!clear_profiles(args)) {
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: Unknown command '" << command << "'\n";
+                print_usage(argv[0]);
+                return 1;
+            }
         }
 
         return 0;

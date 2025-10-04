@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <cstring>
 #include <filesystem>
+#include <utility>
+#include <cstdint>
 
 class LMDBStore {
 public:
@@ -79,8 +81,9 @@ public:
         }
         
         MDB_val key, val;
-        key.mv_size = sizeof(id);
-        key.mv_data = &id;
+        int64_t key_id = id;
+        key.mv_size = sizeof(key_id);
+        key.mv_data = &key_id;
         val.mv_size = name.size();
         val.mv_data = (void*)name.c_str();
         
@@ -118,6 +121,89 @@ public:
         std::string name((char*)val.mv_data, val.mv_size);
         mdb_txn_abort(txn);
         return name;
+    }
+
+    std::vector<std::pair<int64_t, std::string>> get_all_entries() const {
+        MDB_txn* txn;
+        int rc = mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn);
+        if (rc != 0) {
+            throw std::runtime_error("Failed to begin transaction: " + std::string(mdb_strerror(rc)));
+        }
+
+        MDB_cursor* cursor;
+        rc = mdb_cursor_open(txn, dbi_, &cursor);
+        if (rc != 0) {
+            mdb_txn_abort(txn);
+            throw std::runtime_error("Failed to open cursor: " + std::string(mdb_strerror(rc)));
+        }
+
+        std::vector<std::pair<int64_t, std::string>> entries;
+        MDB_val key, val;
+        rc = mdb_cursor_get(cursor, &key, &val, MDB_FIRST);
+        while (rc == 0) {
+            int64_t id = 0;
+            std::memcpy(&id, key.mv_data, sizeof(int64_t));
+            std::string name(static_cast<char*>(val.mv_data), val.mv_size);
+            entries.emplace_back(id, name);
+            rc = mdb_cursor_get(cursor, &key, &val, MDB_NEXT);
+        }
+
+        if (rc != MDB_NOTFOUND) {
+            mdb_cursor_close(cursor);
+            mdb_txn_abort(txn);
+            throw std::runtime_error("Failed to iterate LMDB: " + std::string(mdb_strerror(rc)));
+        }
+
+        mdb_cursor_close(cursor);
+        mdb_txn_abort(txn);
+        return entries;
+    }
+
+    bool delete_id(int64_t id) {
+        if (mode_ == Mode::ReadOnly) {
+            throw std::runtime_error("LMDBStore opened in read-only mode cannot delete entries");
+        }
+        MDB_txn* txn;
+        int rc = mdb_txn_begin(env_, nullptr, 0, &txn);
+        if (rc != 0) {
+            throw std::runtime_error("Failed to begin transaction: " + std::string(mdb_strerror(rc)));
+        }
+
+        MDB_val key;
+        key.mv_size = sizeof(id);
+        key.mv_data = &id;
+
+        rc = mdb_del(txn, dbi_, &key, nullptr);
+        if (rc == MDB_NOTFOUND) {
+            mdb_txn_abort(txn);
+            return false;
+        }
+        if (rc != 0) {
+            mdb_txn_abort(txn);
+            throw std::runtime_error("Failed to delete entry: " + std::string(mdb_strerror(rc)));
+        }
+
+        mdb_txn_commit(txn);
+        return true;
+    }
+
+    void clear() {
+        if (mode_ == Mode::ReadOnly) {
+            throw std::runtime_error("LMDBStore opened in read-only mode cannot be cleared");
+        }
+        MDB_txn* txn;
+        int rc = mdb_txn_begin(env_, nullptr, 0, &txn);
+        if (rc != 0) {
+            throw std::runtime_error("Failed to begin transaction: " + std::string(mdb_strerror(rc)));
+        }
+
+        rc = mdb_drop(txn, dbi_, 0);
+        if (rc != 0) {
+            mdb_txn_abort(txn);
+            throw std::runtime_error("Failed to clear LMDB: " + std::string(mdb_strerror(rc)));
+        }
+
+        mdb_txn_commit(txn);
     }
     
     // Get total number of entries

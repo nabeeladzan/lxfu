@@ -44,6 +44,10 @@
 - Added flag-based argument parsing for `enroll`/`query` (`--device`, `--file`, `--name`).
 - Default profile name is `default`; running `lxfu enroll` without arguments captures from the configured default device.
 - `--all` on `query` allows matching any enrolled name, while `--name` restricts to a specific profile.
+- New management commands:
+  - `lxfu list` summarises enrolled profiles and their embedding IDs.
+  - `lxfu delete --name/--id` removes specific entries (rebuilding the FAISS index).
+  - `lxfu clear` wipes both FAISS and LMDB data, with optional `--confirm` to skip interactive prompts.
 
 ### Usage Examples
 

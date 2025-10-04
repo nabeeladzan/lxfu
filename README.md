@@ -108,6 +108,24 @@ lxfu --preview query --device /dev/video0 --name nabeel
 lxfu --preview query --file unknown.jpg --all
 ```
 
+### Manage Profiles
+
+```bash
+# Show counts and IDs for all enrolled profiles
+lxfu list
+
+# Delete every embedding stored for a profile (requires confirmation)
+lxfu delete --name nabeel --confirm
+
+# Delete a single embedding by ID (IDs reset after deletion)
+lxfu delete --id 3 --confirm
+
+# Wipe the FAISS index and LMDB metadata (asks for confirmation unless --confirm)
+lxfu clear --confirm
+```
+
+All destructive actions prompt for a confirmation unless `--confirm` is supplied. After deletions the embedding IDs are compacted, so run `lxfu list` to review the new numbering.
+
 ### Output Example
 
 ```
