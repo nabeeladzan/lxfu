@@ -85,6 +85,8 @@ bool is_camera_source(const std::string& source) {
     return source.rfind("/dev/video", 0) == 0;
 }
 
+cv::Mat load_image_or_capture(const std::string& source, bool show_preview = false);
+
 bool face_detected(const cv::Mat& original, const cv::Mat& cropped) {
     return cropped.cols != original.cols || cropped.rows != original.rows;
 }
@@ -246,7 +248,7 @@ cv::Mat capture_from_device(const std::string& device_path, bool show_preview = 
     return frame;
 }
 
-cv::Mat load_image_or_capture(const std::string& source, bool show_preview = false) {
+cv::Mat load_image_or_capture(const std::string& source, bool show_preview) {
     // Check if it's a device path
     if (source.find("/dev/video") == 0) {
         return capture_from_device(source, show_preview);
