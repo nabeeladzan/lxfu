@@ -55,7 +55,7 @@ unset(_libtorch_root)
 find_package(Torch REQUIRED)
 
 # Use system OpenCV
-find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui objdetect)
 
 find_library(PAM_LIB pam REQUIRED)
 
