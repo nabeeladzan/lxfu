@@ -4,6 +4,7 @@
 #include <opencv2/objdetect.hpp>
 #include <iostream>
 #include <filesystem>
+#include <optional>
 
 class FaceDetector {
 private:
@@ -69,10 +70,12 @@ public:
     }
     
     // Detect faces and return the largest one (assumed to be the primary face)
-    cv::Rect detect_largest_face(const cv::Mat& image) {
+    std::optional<cv::Rect> detect_largest_face(const cv::Mat& image) {
         if (!initialized_) {
-            // Return full image rect if detector not available
-            return cv::Rect(0, 0, image.cols, image.rows);
+            if (verbose_) {
+                std::cerr << "✗ Face detector unavailable; install OpenCV haarcascades" << std::endl;
+            }
+            return std::nullopt;
         }
         
         // Convert to grayscale for detection
@@ -99,9 +102,9 @@ public:
         
         if (faces.empty()) {
             if (verbose_) {
-                std::cout << "⚠ No face detected, using full image" << std::endl;
+                std::cout << "✗ No face detected" << std::endl;
             }
-            return cv::Rect(0, 0, image.cols, image.rows);
+            return std::nullopt;
         }
         
         // Find largest face
@@ -123,33 +126,32 @@ public:
         
         return largest_face;
     }
-    
+
     // Crop image to face region with optional padding
-    cv::Mat crop_to_face(const cv::Mat& image, float padding = 0.2f) {
-        cv::Rect face_rect = detect_largest_face(image);
-        
-        // If no face detected or detector unavailable, return original
-        if (face_rect.width == image.cols && face_rect.height == image.rows) {
-            return image.clone();
+    std::optional<cv::Mat> crop_to_face(const cv::Mat& image, float padding = 0.2f) {
+        auto face_rect = detect_largest_face(image);
+        if (!face_rect) {
+            return std::nullopt;
         }
-        
+
         // Add padding around face
-        int pad_x = static_cast<int>(face_rect.width * padding);
-        int pad_y = static_cast<int>(face_rect.height * padding);
-        
-        face_rect.x = std::max(0, face_rect.x - pad_x);
-        face_rect.y = std::max(0, face_rect.y - pad_y);
-        face_rect.width = std::min(image.cols - face_rect.x, face_rect.width + 2 * pad_x);
-        face_rect.height = std::min(image.rows - face_rect.y, face_rect.height + 2 * pad_y);
-        
+        int pad_x = static_cast<int>(face_rect->width * padding);
+        int pad_y = static_cast<int>(face_rect->height * padding);
+
+        face_rect->x = std::max(0, face_rect->x - pad_x);
+        face_rect->y = std::max(0, face_rect->y - pad_y);
+        face_rect->width = std::min(image.cols - face_rect->x, face_rect->width + 2 * pad_x);
+        face_rect->height = std::min(image.rows - face_rect->y, face_rect->height + 2 * pad_y);
+
         // Crop to face region
-        cv::Mat cropped = image(face_rect).clone();
-        
+        cv::Rect roi = *face_rect;
+        cv::Mat cropped = image(roi).clone();
+
         if (verbose_) {
             std::cout << "✓ Cropped to face region: " << cropped.cols << "x" << cropped.rows 
                       << " (from " << image.cols << "x" << image.rows << ")" << std::endl;
         }
-        
+
         return cropped;
     }
     

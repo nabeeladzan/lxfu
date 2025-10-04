@@ -12,6 +12,7 @@
 - 📦 **FHS Compliant**: Follows Filesystem Hierarchy Standard
 - ⚡ **Fast Search**: Sub-millisecond face matching
 - 🎓 **DINOv2 Embeddings**: State-of-the-art self-supervised vision features
+- 🔌 **DBus Face Service**: Optional daemon exposing face verification over `dev.nabeeladzan.lxfu` for lock-screen integrations
 
 A high-performance headless face recognition CLI tool using DINOv2 and LMDB.
 
@@ -65,30 +66,69 @@ Command-line arguments always override configuration.
 
 ### Enroll a Face
 
-**Headless mode (default):**
+LXFU uses an intelligent multi-frame enrollment system for camera-based enrollment to maximize recognition accuracy.
+
+**Camera Enrollment (Multi-Frame Capture):**
+
+When enrolling from a camera, LXFU automatically captures multiple frames over 10 seconds:
 
 ```bash
-# Uses default camera (/dev/video0) and stores under name "default"
-lxfu enroll
-
-# Explicit device/name selection
+# Multi-frame enrollment with default camera
 lxfu enroll --device /dev/video0 --name nabeel
 
-# Image enrollment (legacy positional arguments still supported)
-lxfu enroll face.jpg bob
+# With live preview window
+lxfu --preview enroll --device /dev/video0 --name nabeel
 ```
 
-**Preview mode (with GUI confirmation):**
+**How it works:**
+- Captures frames continuously for 10 seconds with a countdown timer
+- Automatically filters out frames without detected faces
+- Instructs you to make slight head movements for pose variation
+- Stores all valid frames as separate embeddings for the profile
+- Results in more robust and accurate recognition
+
+**During enrollment you'll see:**
+```
+╔════════════════════════════════════════════════════╗
+║  ENROLLMENT - Multi-Frame Capture Mode            ║
+╚════════════════════════════════════════════════════╝
+
+Instructions:
+  • Look at the camera and stay centered
+  • VERY SLIGHTLY move and adjust your head
+  • Try small turns left/right and slight up/down
+  • Keep your face visible at all times
+
+⏱  10 seconds remaining... (captured 0 valid frames)
+⏱  9 seconds remaining... (captured 8 valid frames)
+...
+✓ Capture complete!
+  Total frames processed: 95
+  Frames with detected faces: 87
+  Detection rate: 91.6%
+```
+
+**Image File Enrollment (Single Frame):**
+
+For image files, traditional single-frame enrollment is used:
 
 ```bash
-# Show preview window, press SPACE to capture, ESC to cancel
-lxfu --preview enroll --device /dev/video0 --name nabeel
+# Enroll from image file
+lxfu enroll --file face.jpg --name bob
+
+# Legacy positional syntax still supported
+lxfu enroll face.jpg bob
 
 # Preview image before processing
 lxfu --preview enroll --file photo.jpg --name bob
-
-# Note: On headless systems (no DISPLAY), automatically falls back to instant mode
 ```
+
+**Tips for best results:**
+- Ensure good lighting conditions
+- Keep your face clearly visible and centered
+- Make smooth, gentle movements during camera enrollment
+- Avoid rapid movements or turning away from the camera
+- Multiple enrollment sessions can further improve accuracy
 
 ### Query a Face
 
@@ -262,6 +302,40 @@ Building the project also produces `pam_lxfu.so`, a PAM module that lets you plu
 - The module runs headless (no preview) and falls back to other PAM entries when the face database is empty or the match is below the threshold.
 - Optional module options mirror the CLI: `name=<profile>` to require a specific name (defaults to the PAM user) and `allow_all=true` to accept any enrolled profile.
 - The module compares the captured embedding directly against the stored LMDB profiles using cosine similarity.
+
+## Face Service (DBus)
+
+`lxfu_face_service` exposes face verification over the system bus so compositors can start hands-free auth as soon as the lock screen appears.
+
+- Service name: `dev.nabeeladzan.lxfu`
+- Manager object: `/dev/nabeeladzan/lxfu` implementing `dev.nabeeladzan.lxfu.Manager`
+  - Method `GetDefaultDevice()` → object path of the active device (`/dev/nabeeladzan/lxfu/Device0`)
+- Device object: `/dev/nabeeladzan/lxfu/Device0` implementing `dev.nabeeladzan.lxfu.Device`
+  - `Claim()` / `Release()` guard exclusive access to the camera
+  - `VerifyStart(mode)` begins a warm-up + multi-frame capture loop (`mode="any"` is currently supported)
+  - `VerifyStop()` cancels an in-flight capture
+  - Signal `VerificationStatus(status, message)` streams progress (`verify-started`, `verify-match`, `verify-no-face`, `verify-no-match`, `verify-error`, `verify-cancelled`)
+
+Configuration keys (optional) in `lxfu.conf` customise the daemon without recompiling:
+
+```
+service_device=/dev/v4l/by-id/<camera>   # defaults to default_device
+service_profile=default                  # enforce a specific profile, or combine with service_allow_all=true
+service_allow_all=false                  # accept any enrolled profile
+service_warmup_delay=1.0                 # seconds to pre-heat IR emitters
+service_capture_duration=2.0             # seconds to gather frames per attempt
+service_frame_interval=0.1               # delay between frames during capture
+service_threshold=0.90                   # cosine similarity threshold (0..1)
+```
+
+### Running the daemon
+
+```
+cmake --build build --target lxfu_face_service
+./build/bin/lxfu_face_service    # foreground test run
+```
+
+Installers drop the binary in `/usr/bin/lxfu_face_service`; you can wire it into a systemd service or supervise it from your compositor. Clients should `Claim()`, call `VerifyStart("any")`, react to `VerificationStatus`, and finally `Release()` when finished.
 
 ## Development
 

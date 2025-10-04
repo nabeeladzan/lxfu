@@ -2,7 +2,19 @@
 
 ## Recent Changes
 
-### Face Detection (NEW!)
+### Multi-Frame Enrollment (NEW!)
+
+- **10-second capture window**: Camera-based enrollment now captures continuously for 10 seconds
+- **Automatic frame filtering**: Only stores frames with successfully detected faces
+- **Pose variation guidance**: On-screen instructions guide users to make slight head movements
+- **Multiple samples per profile**: Dramatically improves recognition accuracy with diverse angles
+- **Real-time feedback**: Countdown timer and valid frame counter during capture
+- **Preview mode support**: Live visual feedback with face detection overlays
+- **Smart mode detection**: Image files still use single-frame enrollment
+- **Batch embedding extraction**: Efficiently processes all captured frames
+- **Improved statistics**: Shows detection rate and total samples added
+
+### Face Detection
 
 - **Automatic face detection**: Uses OpenCV Haar Cascade to detect and crop faces
 - **Improved accuracy**: DINOv2 processes only face region, not background

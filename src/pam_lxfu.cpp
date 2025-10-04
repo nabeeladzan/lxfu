@@ -22,6 +22,9 @@
 #include <vector>
 #include <ctime>
 #include <numeric>
+#include <tuple>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -29,11 +32,14 @@ struct ModuleOptions {
     std::optional<std::string> source_path;
     std::optional<std::string> device_path;
     std::optional<std::string> target_name;
-    double threshold = 0.90;
+    double threshold = 0.75;
     bool debug = false;
     bool allow_all = false;
     int retries = 1;
     double interval_seconds = 0.0;
+    double warmup_delay_seconds = 0.0;
+    double capture_duration_seconds = 2.0;
+    double frame_interval_seconds = 0.1;
 };
 
 ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
@@ -90,69 +96,245 @@ ModuleOptions parse_options(pam_handle_t* pamh, int argc, const char** argv) {
             } catch (const std::exception&) {
                 pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid interval '%s'", value.c_str());
             }
+        } else if (key == "warmup_delay") {
+            try {
+                double seconds = std::stod(value);
+                if (seconds < 0.0) {
+                    pam_syslog(pamh, LOG_WARNING, "pam_lxfu: warmup_delay must be >=0, received %f", seconds);
+                } else {
+                    opts.warmup_delay_seconds = seconds;
+                }
+            } catch (const std::exception&) {
+                pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid warmup_delay '%s'", value.c_str());
+            }
+        } else if (key == "capture_duration") {
+            try {
+                double seconds = std::stod(value);
+                if (seconds < 0.0) {
+                    pam_syslog(pamh, LOG_WARNING, "pam_lxfu: capture_duration must be >=0, received %f", seconds);
+                } else {
+                    opts.capture_duration_seconds = seconds;
+                }
+            } catch (const std::exception&) {
+                pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid capture_duration '%s'", value.c_str());
+            }
+        } else if (key == "frame_interval") {
+            try {
+                double seconds = std::stod(value);
+                if (seconds < 0.0) {
+                    pam_syslog(pamh, LOG_WARNING, "pam_lxfu: frame_interval must be >=0, received %f", seconds);
+                } else {
+                    opts.frame_interval_seconds = seconds;
+                }
+            } catch (const std::exception&) {
+                pam_syslog(pamh, LOG_WARNING, "pam_lxfu: invalid frame_interval '%s'", value.c_str());
+            }
         } else {
             pam_syslog(pamh, LOG_WARNING, "pam_lxfu: unknown option '%s'", key.c_str());
         }
     }
 
     if (opts.threshold <= 0.0 || opts.threshold > 1.0) {
-        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: threshold %.3f out of range, resetting to 0.90", opts.threshold);
-        opts.threshold = 0.90;
+        pam_syslog(pamh, LOG_WARNING, "pam_lxfu: threshold %.3f out of range, resetting to 0.75", opts.threshold);
+        opts.threshold = 0.75;
     }
 
     return opts;
 }
 
-cv::Mat capture_frame(const std::string& device, pam_handle_t* pamh, bool debug) {
-    cv::VideoCapture cap;
-    int device_id = -1;
-    if (device.rfind("/dev/video", 0) == 0) {
-        try {
-            device_id = std::stoi(device.substr(10));
-        } catch (const std::exception&) {
-            device_id = -1;
+bool parse_device_index(const std::string& path, int& index) {
+    if (path.rfind("/dev/video", 0) != 0) {
+        return false;
+    }
+    try {
+        index = std::stoi(path.substr(10));
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool open_video_capture(cv::VideoCapture& cap, const std::string& source, pam_handle_t* pamh, bool debug) {
+    cap.release();
+
+    if (cap.open(source, cv::CAP_V4L2)) {
+        if (debug) {
+            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: opened device '%s' via CAP_V4L2", source.c_str());
         }
+        return true;
+    }
+    if (cap.open(source)) {
+        if (debug) {
+            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: opened device '%s' via default backend", source.c_str());
+        }
+        return true;
     }
 
-    if (device_id >= 0) {
-        cap.open(device_id);
-    } else {
-        cap.open(device);
+    int index = -1;
+    if (parse_device_index(source, index) && cap.open(index)) {
+        if (debug) {
+            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: opened device '%s' via numeric index %d", source.c_str(), index);
+        }
+        return true;
     }
 
-    if (!cap.isOpened()) {
-        pam_syslog(pamh, LOG_ERR, "pam_lxfu: failed to open capture device '%s'", device.c_str());
+    pam_syslog(pamh, LOG_ERR, "pam_lxfu: failed to open capture device '%s'", source.c_str());
+    return false;
+}
+
+void apply_camera_defaults(cv::VideoCapture& cap) {
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+    cap.set(cv::CAP_PROP_FPS, 30);
+}
+
+void warm_up_camera(cv::VideoCapture& cap, double warmup_delay_seconds, pam_handle_t* pamh, bool debug) {
+    cv::Mat dummy;
+    const int default_warmup_frames = 12;
+
+    if (warmup_delay_seconds <= 0.0) {
+        for (int i = 0; i < default_warmup_frames; ++i) {
+            if (!cap.read(dummy) || dummy.empty()) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+        return;
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    const auto warmup_duration = std::chrono::duration<double>(warmup_delay_seconds);
+    int frames_read = 0;
+    while (std::chrono::steady_clock::now() - start < warmup_duration) {
+        if (!cap.read(dummy) || dummy.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            continue;
+        }
+        ++frames_read;
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+    if (debug) {
+        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: warmup captured %d frames over %.2fs", frames_read, warmup_delay_seconds);
+    }
+}
+
+std::vector<cv::Mat> capture_faces_from_device(const std::string& device,
+                                               const ModuleOptions& opts,
+                                               pam_handle_t* pamh,
+                                               FaceDetector& detector) {
+    cv::VideoCapture cap;
+    if (!open_video_capture(cap, device, pamh, opts.debug)) {
         throw std::runtime_error("capture device open failure");
     }
 
-    cv::Mat frame;
-    cap >> frame;
+    apply_camera_defaults(cap);
+    warm_up_camera(cap, opts.warmup_delay_seconds, pamh, opts.debug);
+
+    const double capture_duration = std::max(0.0, opts.capture_duration_seconds);
+    const double frame_interval = std::max(0.0, opts.frame_interval_seconds);
+    const auto start_time = std::chrono::steady_clock::now();
+    const int max_faces = 60;
+
+    std::vector<cv::Mat> face_images;
+    std::vector<cv::Mat> fallback_frames;
+
+    int total_frames = 0;
+    int frames_with_faces = 0;
+    int consecutive_failures = 0;
+    const int max_consecutive_failures = 20;
+
+    while (true) {
+        if (capture_duration > 0.0) {
+            double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
+            if (elapsed >= capture_duration) {
+                break;
+            }
+        } else if (total_frames > 0) {
+            break;
+        }
+
+        cv::Mat frame;
+        if (!cap.read(frame) || frame.empty()) {
+            ++consecutive_failures;
+            if (opts.debug && (consecutive_failures == 1 || consecutive_failures % 5 == 0)) {
+                pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: failed to capture frame (%d)", consecutive_failures);
+            }
+            if (consecutive_failures >= max_consecutive_failures) {
+                break;
+            }
+            if (frame_interval > 0.0) {
+                std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::duration<double>(frame_interval)));
+            }
+            continue;
+        }
+
+        consecutive_failures = 0;
+        ++total_frames;
+
+        auto face = detector.crop_to_face(frame);
+        if (face) {
+            face_images.push_back(*face);
+            ++frames_with_faces;
+        } else if (face_images.empty()) {
+            fallback_frames.push_back(frame);
+        }
+
+        if (face_images.size() >= static_cast<std::size_t>(max_faces)) {
+            break;
+        }
+
+        if (frame_interval > 0.0) {
+            std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::duration<double>(frame_interval)));
+        }
+    }
+
     cap.release();
 
-    if (frame.empty()) {
-        pam_syslog(pamh, LOG_ERR, "pam_lxfu: empty frame captured from '%s'", device.c_str());
-        throw std::runtime_error("empty frame");
+    if (face_images.empty() && !fallback_frames.empty()) {
+        if (auto face = detector.crop_to_face(fallback_frames.back())) {
+            face_images.push_back(*face);
+        }
     }
 
-    if (debug) {
-        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: captured frame %dx%d", frame.cols, frame.rows);
+    if (opts.debug) {
+        pam_syslog(pamh, LOG_DEBUG,
+                   "pam_lxfu: captured %d frames, %d with detected faces",
+                   total_frames, frames_with_faces);
     }
 
-    return frame.clone();
+    return face_images;
 }
 
-cv::Mat load_source(const ModuleOptions& opts, pam_handle_t* pamh, const Config& config) {
+std::vector<cv::Mat> load_faces(const ModuleOptions& opts,
+                                pam_handle_t* pamh,
+                                const Config& config,
+                                FaceDetector& detector) {
     if (opts.source_path) {
         cv::Mat image = cv::imread(*opts.source_path);
         if (image.empty()) {
             pam_syslog(pamh, LOG_ERR, "pam_lxfu: failed to load image '%s'", opts.source_path->c_str());
             throw std::runtime_error("image load failure");
         }
-        return image;
+        auto face = detector.crop_to_face(image);
+        if (!face) {
+            pam_syslog(pamh, LOG_WARNING, "pam_lxfu: no face detected in source image '%s'", opts.source_path->c_str());
+            return {};
+        }
+        return { *face };
     }
 
     std::string device = opts.device_path.value_or(config.get("default_device", "/dev/video0"));
-    return capture_frame(device, pamh, opts.debug);
+    if (opts.debug) {
+        pam_syslog(pamh, LOG_DEBUG,
+                   "pam_lxfu: capturing from device '%s' (duration %.2fs, frame_interval %.2fs, warmup %.2fs)",
+                   device.c_str(),
+                   std::max(0.0, opts.capture_duration_seconds),
+                   std::max(0.0, opts.frame_interval_seconds),
+                   std::max(0.0, opts.warmup_delay_seconds));
+    }
+    return capture_faces_from_device(device, opts, pamh, detector);
 }
 
 FaceDetector& shared_face_detector() {
@@ -173,20 +355,38 @@ FaceEngine& shared_face_engine(const std::string& model_path) {
 
 int match_user_with_face(pam_handle_t* pamh, const std::string& username, const ModuleOptions& opts) {
     Config config = load_config(false);
-    cv::Mat frame = load_source(opts, pamh, config);
 
     FaceDetector& detector = shared_face_detector();
     if (!detector.is_initialized()) {
         pam_syslog(pamh, LOG_WARNING, "pam_lxfu: face detector not available; using full frame");
     }
 
-    cv::Mat face_image = detector.crop_to_face(frame);
+    std::vector<cv::Mat> face_images;
+    try {
+        face_images = load_faces(opts, pamh, config, detector);
+    } catch (const std::exception& ex) {
+        pam_syslog(pamh, LOG_ERR, "pam_lxfu: capture error: %s", ex.what());
+        return PAM_AUTHINFO_UNAVAIL;
+    }
+
+    if (face_images.empty()) {
+        pam_syslog(pamh, LOG_INFO, "pam_lxfu: no valid face frames captured");
+        return PAM_AUTH_ERR;
+    }
 
     FaceEngine& engine = shared_face_engine(config.get("model_path"));
 
-    std::vector<float> embedding = engine.extract_embedding(face_image);
-    if (embedding.empty()) {
-        pam_syslog(pamh, LOG_ERR, "pam_lxfu: embedding extraction failed");
+    std::vector<std::vector<float>> query_embeddings;
+    query_embeddings.reserve(face_images.size());
+    for (const auto& face : face_images) {
+        std::vector<float> embedding = engine.extract_embedding(face);
+        if (!embedding.empty()) {
+            query_embeddings.push_back(std::move(embedding));
+        }
+    }
+
+    if (query_embeddings.empty()) {
+        pam_syslog(pamh, LOG_ERR, "pam_lxfu: embedding extraction failed for captured frames");
         return PAM_AUTHINFO_UNAVAIL;
     }
 
@@ -197,55 +397,88 @@ int match_user_with_face(pam_handle_t* pamh, const std::string& username, const 
         return PAM_AUTHINFO_UNAVAIL;
     }
 
-    auto compute_best = [&](const std::vector<std::pair<std::string, std::vector<float>>>& profiles,
-                            const std::optional<std::string>& target) -> std::pair<std::string, float> {
-        float best = -1.0f;
+    auto compute_best = [&](const std::vector<std::pair<std::string, LMDBStore::EmbeddingList>>& profiles,
+                            const std::optional<std::string>& target)
+        -> std::tuple<std::string, float, float> {
+        float best_avg = -1.0f;
+        float best_max = -1.0f;
         std::string best_name;
-        for (const auto& [name, stored_embedding] : profiles) {
+
+        for (const auto& [name, embeddings] : profiles) {
             if (target && name != *target) {
                 continue;
             }
-            if (stored_embedding.size() != embedding.size()) {
+            if (embeddings.empty()) {
                 continue;
             }
-            float sim = std::inner_product(embedding.begin(), embedding.end(),
-                                           stored_embedding.begin(), 0.0f);
-            if (sim > best) {
-                best = sim;
+
+            bool dimension_mismatch = std::any_of(
+                embeddings.begin(), embeddings.end(),
+                [&](const auto& emb) {
+                    return emb.size() != query_embeddings.front().size();
+                });
+            if (dimension_mismatch) {
+                continue;
+            }
+
+            double sum_similarity = 0.0;
+            float max_similarity = -1.0f;
+            std::size_t count = 0;
+
+            for (const auto& stored : embeddings) {
+                for (const auto& query_emb : query_embeddings) {
+                    float sim = std::inner_product(query_emb.begin(), query_emb.end(),
+                                                   stored.begin(), 0.0f);
+                    sim = (sim + 1.0f) * 0.5f;
+                    sum_similarity += static_cast<double>(sim);
+                    max_similarity = std::max(max_similarity, sim);
+                    ++count;
+                }
+            }
+
+            if (count == 0) {
+                continue;
+            }
+
+            float avg_similarity = static_cast<float>(sum_similarity / static_cast<double>(count));
+            if (avg_similarity > best_avg) {
+                best_avg = avg_similarity;
+                best_max = max_similarity;
                 best_name = name;
             }
         }
-        return {best_name, best};
+
+        return {best_name, best_avg, best_max};
     };
 
     if (!opts.allow_all) {
         std::string desired = opts.target_name.value_or(username);
-        auto [matched_name, similarity] = compute_best(entries, desired);
-        if (similarity < 0.0f) {
+        auto [matched_name, avg_similarity, max_similarity] = compute_best(entries, desired);
+        if (avg_similarity < 0.0f) {
             pam_syslog(pamh, LOG_INFO, "pam_lxfu: no match for requested name '%s'", desired.c_str());
             return PAM_AUTH_ERR;
         }
-        if (similarity < static_cast<float>(opts.threshold)) {
+        if (avg_similarity < static_cast<float>(opts.threshold)) {
             pam_syslog(pamh, LOG_INFO, "pam_lxfu: similarity %.2f below threshold %.2f for '%s'",
-                       similarity, opts.threshold, desired.c_str());
+                       avg_similarity, opts.threshold, desired.c_str());
             return PAM_AUTH_ERR;
         }
         if (opts.debug) {
-            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: user '%s' matched with similarity %.2f",
-                       desired.c_str(), similarity);
+            pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: user '%s' matched avg %.2f (max %.2f) using %zu frame(s)",
+                       desired.c_str(), avg_similarity, max_similarity, query_embeddings.size());
         }
         return PAM_SUCCESS;
     }
 
-    auto [best_name, best_similarity] = compute_best(entries, std::nullopt);
-    if (best_name.empty() || best_similarity < static_cast<float>(opts.threshold)) {
+    auto [best_name, best_avg, best_max] = compute_best(entries, std::nullopt);
+    if (best_name.empty() || best_avg < static_cast<float>(opts.threshold)) {
         pam_syslog(pamh, LOG_INFO, "pam_lxfu: no profile exceeded threshold %.2f", opts.threshold);
         return PAM_AUTH_ERR;
     }
 
     if (opts.debug) {
-        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: matched profile '%s' with similarity %.2f",
-                   best_name.c_str(), best_similarity);
+        pam_syslog(pamh, LOG_DEBUG, "pam_lxfu: matched profile '%s' avg %.2f (max %.2f) using %zu frame(s)",
+                   best_name.c_str(), best_avg, best_max, query_embeddings.size());
     }
 
     return PAM_SUCCESS;

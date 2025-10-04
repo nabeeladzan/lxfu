@@ -17,12 +17,25 @@ lxfu enroll <source> <name>
 lxfu --preview enroll <source> <name>
 ```
 
-**Examples:**
+**Camera Enrollment (Multi-Frame):**
+
+When using a camera device, LXFU captures multiple frames over 10 seconds for improved accuracy:
 
 ```bash
-lxfu enroll /dev/video0 alice        # Webcam (instant)
-lxfu enroll face.jpg bob             # Image file
-lxfu --preview enroll /dev/video0 alice  # With preview window
+lxfu enroll --device /dev/video0 --name alice
+lxfu --preview enroll --device /dev/video0 --name alice
+```
+
+- Captures continuously for 10 seconds with countdown
+- Filters out frames without detected faces automatically
+- Stores all valid frames as separate embeddings
+- Instructions guide you to make slight head movements
+
+**Image File Enrollment (Single Frame):**
+
+```bash
+lxfu enroll --file face.jpg --name bob
+lxfu enroll face.jpg bob  # Legacy syntax
 ```
 
 ### Query
@@ -66,7 +79,25 @@ db_path=~/.lxfu
 
 # Default camera device
 default_device=/dev/video0
+
+# Optional DBus face service tuning
+# service_device=/dev/v4l/by-id/<camera>
+# service_allow_all=false
+# service_warmup_delay=1.0
+# service_capture_duration=2.0
+# service_frame_interval=0.1
+# service_threshold=0.90
 ```
+
+## DBus Face Service
+
+- Binary: `lxfu_face_service`
+- Bus name: `dev.nabeeladzan.lxfu`
+- Manager object: `/dev/nabeeladzan/lxfu`
+- Device object: `/dev/nabeeladzan/lxfu/Device0`
+- Methods: `Claim()`, `Release()`, `VerifyStart("any")`, `VerifyStop()`
+- Signal: `VerificationStatus(status, message)` → `verify-started`, `verify-match`, `verify-no-match`, `verify-no-face`, `verify-error`, `verify-cancelled`
+- Typical flow: `Claim → VerifyStart → wait for signals → VerifyStop → Release`
 
 ## File Locations
 
@@ -89,20 +120,74 @@ When using `--preview` flag:
 
 ## Output Examples
 
-### Successful Enrollment
+### Successful Enrollment (Camera - Multi-Frame)
+
+```
+╔════════════════════════════════════════════════════╗
+║  ENROLLMENT - Multi-Frame Capture Mode            ║
+╚════════════════════════════════════════════════════╝
+
+Instructions:
+  • Look at the camera and stay centered
+  • VERY SLIGHTLY move and adjust your head
+  • Try small turns left/right and slight up/down
+  • Keep your face visible at all times
+
+Capturing frames for 10 seconds...
+
+Warming up camera...
+
+Starting capture...
+⏱  10 seconds remaining... (captured 0 valid frames)
+⏱  9 seconds remaining... (captured 12 valid frames)
+⏱  8 seconds remaining... (captured 23 valid frames)
+...
+⏱  1 seconds remaining... (captured 89 valid frames)
+
+✓ Capture complete!
+  Total frames processed: 98
+  Frames with detected faces: 92
+  Detection rate: 93.9%
+
+Extracting embeddings from 92 frame(s)...
+  Processing frame 1/92...
+  Processing frame 10/92...
+  Processing frame 20/92...
+  ...
+  Processing frame 92/92...
+
+╔════════════════════════════════════════════════════╗
+║  ✓ ENROLLMENT SUCCESSFUL!                          ║
+╚════════════════════════════════════════════════════╝
+
+  Profile: alice
+  Embedding dimensions: 384
+  New samples added: 92
+  Total samples for profile: 92
+  Total profiles in database: 1
+```
+
+### Successful Enrollment (Image File)
 
 ```
 Loaded config from /etc/lxfu/lxfu.conf
-Loading/capturing face...
+Loading image from file...
 Image loaded: 640x480
-Extracting face embedding...
-Embedding extracted: 384 dimensions
-Face added to index with ID: 0
+✓ Face detected at (142, 98) size 256x256
+✓ Cropped to face region: 307x307 (from 640x480)
 
-✓ Enrollment successful!
-  Name: alice
-  Face ID: 0
-  Total faces in database: 1
+Extracting embeddings from 1 frame(s)...
+  Processing frame 1/1...
+
+╔════════════════════════════════════════════════════╗
+║  ✓ ENROLLMENT SUCCESSFUL!                          ║
+╚════════════════════════════════════════════════════╝
+
+  Profile: bob
+  Embedding dimensions: 384
+  New samples added: 1
+  Total samples for profile: 1
+  Total profiles in database: 2
 ```
 
 ### Successful Query

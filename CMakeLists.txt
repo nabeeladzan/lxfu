@@ -59,6 +59,9 @@ find_package(Torch REQUIRED)
 # Use system OpenCV
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui objdetect)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SYSTEMD REQUIRED libsystemd)
+
 find_library(PAM_LIB pam REQUIRED)
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
@@ -81,6 +84,14 @@ target_compile_features(lxfu PRIVATE cxx_std_17)
 add_executable(dinov3_demo src/main.cpp)
 target_link_libraries(dinov3_demo PRIVATE "${TORCH_LIBRARIES}" ${OpenCV_LIBS} lmdb pthread)
 target_compile_features(dinov3_demo PRIVATE cxx_std_17)
+
+add_executable(lxfu_face_service
+    src/face_service.cpp
+    src/face_service_main.cpp
+)
+target_link_libraries(lxfu_face_service PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} lmdb pthread ${SYSTEMD_LIBRARIES})
+target_include_directories(lxfu_face_service PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
+target_compile_features(lxfu_face_service PRIVATE cxx_std_17)
 
 add_library(pam_lxfu MODULE src/pam_lxfu.cpp)
 target_link_libraries(pam_lxfu PRIVATE ${TORCH_LIBRARIES} ${OpenCV_LIBS} lmdb pthread ${PAM_LIB})
@@ -122,6 +133,14 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 # Install rules
 install(TARGETS lxfu DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS lxfu_face_service DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(TARGETS pam_lxfu DESTINATION "${CMAKE_INSTALL_LIBDIR}/security")
-install(FILES lxfu.conf DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/lxfu")
+
+# Install config to /etc for /usr prefix, otherwise PREFIX/etc
+if(CMAKE_INSTALL_PREFIX STREQUAL "/usr")
+  install(FILES lxfu.conf DESTINATION "/etc/lxfu")
+else()
+  install(FILES lxfu.conf DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/lxfu")
+endif()
+
 install(FILES dino.pt DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/lxfu")

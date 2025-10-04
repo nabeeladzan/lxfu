@@ -7,6 +7,8 @@
 #include <string>
 #include <filesystem>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 class FaceEngine {
 private:
@@ -19,14 +21,46 @@ private:
     torch::Tensor preprocess_image(const cv::Mat& image) {
         cv::Mat rgb_image;
         cv::cvtColor(image, rgb_image, cv::COLOR_BGR2RGB);
-        
-        // Resize to 224x224 (DINOv2 input size)
+
+        const int target_size = 224;
+        const float crop_pct = 0.875f;
+        const int resize_size = static_cast<int>(std::round(target_size / crop_pct));
+
+        int resize_width = 0;
+        int resize_height = 0;
+        if (rgb_image.cols >= rgb_image.rows) {
+            resize_height = resize_size;
+            resize_width = static_cast<int>(std::round(
+                resize_size * static_cast<float>(rgb_image.cols) / static_cast<float>(rgb_image.rows)));
+        } else {
+            resize_width = resize_size;
+            resize_height = static_cast<int>(std::round(
+                resize_size * static_cast<float>(rgb_image.rows) / static_cast<float>(rgb_image.cols)));
+        }
+
+        resize_width = std::max(resize_width, target_size);
+        resize_height = std::max(resize_height, target_size);
+
         cv::Mat resized;
-        cv::resize(rgb_image, resized, cv::Size(224, 224));
-        
+        cv::resize(rgb_image, resized, cv::Size(resize_width, resize_height), 0.0, 0.0, cv::INTER_CUBIC);
+
+        const int raw_x0 = (resized.cols - target_size) / 2;
+        const int raw_y0 = (resized.rows - target_size) / 2;
+        const int max_x = std::max(0, resized.cols - target_size);
+        const int max_y = std::max(0, resized.rows - target_size);
+        const int x0 = std::clamp(raw_x0, 0, max_x);
+        const int y0 = std::clamp(raw_y0, 0, max_y);
+        const int crop_width = std::min(target_size, resized.cols);
+        const int crop_height = std::min(target_size, resized.rows);
+        cv::Rect crop{x0, y0, crop_width, crop_height};
+        cv::Mat cropped = resized(crop).clone();
+        if (cropped.cols != target_size || cropped.rows != target_size) {
+            cv::resize(cropped, cropped, cv::Size(target_size, target_size), 0.0, 0.0, cv::INTER_CUBIC);
+        }
+
         // Convert to float and normalize to [0, 1]
         cv::Mat float_image;
-        resized.convertTo(float_image, CV_32FC3, 1.0 / 255.0);
+        cropped.convertTo(float_image, CV_32FC3, 1.0 / 255.0);
         
         // ImageNet normalization
         const std::vector<float> mean = {0.485f, 0.456f, 0.406f};

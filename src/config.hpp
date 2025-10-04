@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <iostream>
 #include <cstdlib>
+#include <vector>
+#include <algorithm>
 
 class Config {
 private:
