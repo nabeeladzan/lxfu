@@ -137,8 +137,8 @@ Searching for similar faces...
 
 ✓ Face recognized!
   Name: alice (requested)
-  Similarity: 94.23%
-  Face ID: 0
+  Average similarity: 94.23%
+  Samples considered: 3
 ```
 
 ### Preview Mode & Headless Fallback
@@ -269,6 +269,7 @@ Building the project also produces `pam_lxfu.so`, a PAM module that lets you plu
 - Add it to a service, e.g. `auth sufficient pam_lxfu.so device=/dev/video0 threshold=0.92`.
 - The module runs headless (no preview) and falls back to other PAM entries when the face database is empty or the match is below the threshold.
 - Optional module options mirror the CLI: `name=<profile>` to require a specific name (defaults to the PAM user) and `allow_all=true` to accept any enrolled profile.
+- Internally, both the CLI and PAM average the cosine similarities across all stored samples for each profile, so retries and threshold checks use the mean score rather than a single best vector.
 
 ## Development
 

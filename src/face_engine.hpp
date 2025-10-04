@@ -139,7 +139,7 @@ public:
         int64_t id;
         float similarity;
     };
-    
+
     SearchResult search(const std::vector<float>& embedding, int k = 1) {
         auto results = search_many(embedding, k);
         if (results.empty()) {
