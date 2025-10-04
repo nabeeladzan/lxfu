@@ -1,0 +1,30 @@
+# Build directories
+build/
+CMakeFiles/
+cmake-build-*/
+CMakeCache.txt
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# Binaries and shared libraries
+*.o
+*.so
+*.so.*
+*.a
+*.dll
+*.dylib
+*/bin/
+
+# Generated indices/databases
+*.index
+*.db
+*.db/*
+
+# Editor and OS cruft
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/
