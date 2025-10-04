@@ -44,6 +44,24 @@ if [[ "${INSTALL_PREFIX}" == "/usr" ]]; then
     fi
 fi
 
+# Install systemd unit if systemd is present
+SERVICE_SRC="packaging/lxfu-face.service"
+SERVICE_DEST="/etc/systemd/system/lxfu-face.service"
+if [[ -d "/run/systemd/system" ]]; then
+    if [[ -f "${SERVICE_SRC}" ]]; then
+        tmp_service=$(mktemp)
+        sed "s|@PREFIX@|${INSTALL_PREFIX}|g" "${SERVICE_SRC}" > "${tmp_service}"
+        install -D -m 0644 "${tmp_service}" "${SERVICE_DEST}"
+        rm -f "${tmp_service}"
+        echo "Installed systemd unit to ${SERVICE_DEST} (not enabled)"
+        echo "Enable with: sudo systemctl enable --now lxfu-face.service"
+    else
+        echo "Warning: ${SERVICE_SRC} not found; skipping systemd unit installation" >&2
+    fi
+else
+    echo "Systemd not detected; skipping unit installation"
+fi
+
 echo ""
 echo "Installation complete!"
 echo "  Binary: ${INSTALL_PREFIX}/bin/lxfu"

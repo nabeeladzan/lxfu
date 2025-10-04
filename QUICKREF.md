@@ -98,6 +98,7 @@ default_device=/dev/video0
 - Methods: `Claim()`, `Release()`, `VerifyStart("any")`, `VerifyStop()`
 - Signal: `VerificationStatus(status, message)` → `verify-started`, `verify-match`, `verify-no-match`, `verify-no-face`, `verify-error`, `verify-cancelled`
 - Typical flow: `Claim → VerifyStart → wait for signals → VerifyStop → Release`
+- Install script drops `/etc/systemd/system/lxfu-face.service`; enable via `sudo systemctl enable --now lxfu-face.service` if desired.
 
 ## File Locations
 

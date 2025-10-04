@@ -335,7 +335,7 @@ cmake --build build --target lxfu_face_service
 ./build/bin/lxfu_face_service    # foreground test run
 ```
 
-Installers drop the binary in `/usr/bin/lxfu_face_service`; you can wire it into a systemd service or supervise it from your compositor. Clients should `Claim()`, call `VerifyStart("any")`, react to `VerificationStatus`, and finally `Release()` when finished.
+Installers drop the binary in `/usr/bin/lxfu_face_service` and install a systemd unit at `/etc/systemd/system/lxfu-face.service` (left disabled by default). Enable it with `sudo systemctl enable --now lxfu-face.service`, or wire the binary into your own supervisor. Clients should `Claim()`, call `VerifyStart("any")`, react to `VerificationStatus`, and finally `Release()` when finished.
 
 ## Development
 
