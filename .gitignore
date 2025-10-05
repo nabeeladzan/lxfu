@@ -7,6 +7,10 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
+# Vendored third-party SDKs
+libtorch/
+dino.pt
+
 # Binaries and shared libraries
 *.o
 *.so
