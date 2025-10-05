@@ -56,37 +56,6 @@ if [[ "${INSTALL_PREFIX}" == "/usr" ]]; then
     fi
 fi
 
-# Install systemd unit if systemd is present
-SERVICE_SRC="packaging/lxfu-face.service"
-SERVICE_DEST="/etc/systemd/system/lxfu-face.service"
-if [[ -d "/run/systemd/system" ]]; then
-    if [[ -f "${SERVICE_SRC}" ]]; then
-        tmp_service=$(mktemp)
-        sed "s|@PREFIX@|${INSTALL_PREFIX}|g" "${SERVICE_SRC}" > "${tmp_service}"
-        install -D -m 0644 "${tmp_service}" "${SERVICE_DEST}"
-        rm -f "${tmp_service}"
-        echo "Installed systemd unit to ${SERVICE_DEST} (not enabled)"
-        echo "Enable with: sudo systemctl enable --now lxfu-face.service"
-    else
-        echo "Warning: ${SERVICE_SRC} not found; skipping systemd unit installation" >&2
-    fi
-else
-    echo "Systemd not detected; skipping unit installation"
-fi
-
-# Install DBus policy for face service
-DBUS_POLICY_SRC="packaging/dev.nabeeladzan.lxfu.conf"
-DBUS_POLICY_DEST="/etc/dbus-1/system.d/dev.nabeeladzan.lxfu.conf"
-if [[ -f "${DBUS_POLICY_SRC}" ]]; then
-    install -D -m 0644 "${DBUS_POLICY_SRC}" "${DBUS_POLICY_DEST}"
-    if command -v busctl >/dev/null 2>&1; then
-        busctl call org.freedesktop.DBus / org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || true
-    fi
-    echo "Installed DBus policy to ${DBUS_POLICY_DEST}"
-else
-    echo "Warning: ${DBUS_POLICY_SRC} not found; skipping DBus policy install" >&2
-fi
-
 echo ""
 echo "Installation complete!"
 echo "  Binary: ${INSTALL_PREFIX}/bin/lxfu"

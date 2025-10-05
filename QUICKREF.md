@@ -80,25 +80,7 @@ db_path=~/.lxfu
 # Default camera device
 default_device=/dev/video0
 
-# Optional DBus face service tuning
-# service_device=/dev/v4l/by-id/<camera>
-# service_allow_all=false
-# service_warmup_delay=1.0
-# service_capture_duration=2.0
-# service_frame_interval=0.1
-# service_threshold=0.90
 ```
-
-## DBus Face Service
-
-- Binary: `lxfu_face_service`
-- Bus name: `dev.nabeeladzan.lxfu`
-- Manager object: `/dev/nabeeladzan/lxfu`
-- Device object: `/dev/nabeeladzan/lxfu/Device0`
-- Methods: `Claim()`, `Release()`, `VerifyStart("any")`, `VerifyStop()`
-- Signal: `VerificationStatus(status, message)` → `verify-started`, `verify-match`, `verify-no-match`, `verify-no-face`, `verify-error`, `verify-cancelled`
-- Typical flow: `Claim → VerifyStart → wait for signals → VerifyStop → Release`
-- Install script drops `/etc/dbus-1/system.d/dev.nabeeladzan.lxfu.conf` and `/etc/systemd/system/lxfu-face.service`; enable via `sudo systemctl enable --now lxfu-face.service` if desired.
 
 ## File Locations
 

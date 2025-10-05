@@ -521,38 +521,3 @@ unset DISPLAY
 time ./build/bin/lxfu --preview enroll /dev/video0 perf_test3
 # Expected: Negligible overhead for display detection
 ```
-
-## Face Service Tests
-
-### Test 7: DBus Verification (CLI client)
-
-**Setup:**
-
-```bash
-cmake --build build --target lxfu_face_service
-./build/bin/lxfu_face_service &
-SERVICE_PID=$!
-```
-
-**Client (busctl example):**
-
-```bash
-busctl call dev.nabeeladzan.lxfu /dev/nabeeladzan/lxfu/Device0 dev.nabeeladzan.lxfu.Device Claim
-busctl call dev.nabeeladzan.lxfu /dev/nabeeladzan/lxfu/Device0 dev.nabeeladzan.lxfu.Device VerifyStart s any
-# listen for status updates in another terminal
-busctl monitor dev.nabeeladzan.lxfu | rg VerificationStatus
-```
-
-**Expected Behavior:**
-
-- ✅ `VerificationStatus` emits `verify-started`
-- ✅ Matches emit `verify-match <profile>:<score>`
-- ✅ Absent/failed captures emit `verify-no-face` or `verify-no-match`
-- ✅ `VerifyStop` triggers `verify-cancelled`
-- ✅ `Release` frees the device cleanly
-
-Shutdown the daemon after testing:
-
-```bash
-kill $SERVICE_PID
-```

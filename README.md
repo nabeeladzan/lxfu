@@ -12,7 +12,6 @@
 - 📦 **FHS Compliant**: Follows Filesystem Hierarchy Standard
 - ⚡ **Fast Search**: Sub-millisecond face matching
 - 🎓 **DINOv2 Embeddings**: State-of-the-art self-supervised vision features
-- 🔌 **DBus Face Service**: Optional daemon exposing face verification over `dev.nabeeladzan.lxfu` for lock-screen integrations
 
 A high-performance headless face recognition CLI tool using DINOv2 and LMDB.
 
@@ -302,40 +301,6 @@ Building the project also produces `pam_lxfu.so`, a PAM module that lets you plu
 - The module runs headless (no preview) and falls back to other PAM entries when the face database is empty or the match is below the threshold.
 - Optional module options mirror the CLI: `name=<profile>` to require a specific name (defaults to the PAM user) and `allow_all=true` to accept any enrolled profile.
 - The module compares the captured embedding directly against the stored LMDB profiles using cosine similarity.
-
-## Face Service (DBus)
-
-`lxfu_face_service` exposes face verification over the system bus so compositors can start hands-free auth as soon as the lock screen appears.
-
-- Service name: `dev.nabeeladzan.lxfu`
-- Manager object: `/dev/nabeeladzan/lxfu` implementing `dev.nabeeladzan.lxfu.Manager`
-  - Method `GetDefaultDevice()` → object path of the active device (`/dev/nabeeladzan/lxfu/Device0`)
-- Device object: `/dev/nabeeladzan/lxfu/Device0` implementing `dev.nabeeladzan.lxfu.Device`
-  - `Claim()` / `Release()` guard exclusive access to the camera
-  - `VerifyStart(mode)` begins a warm-up + multi-frame capture loop (`mode="any"` is currently supported)
-  - `VerifyStop()` cancels an in-flight capture
-  - Signal `VerificationStatus(status, message)` streams progress (`verify-started`, `verify-match`, `verify-no-face`, `verify-no-match`, `verify-error`, `verify-cancelled`)
-
-Configuration keys (optional) in `lxfu.conf` customise the daemon without recompiling:
-
-```
-service_device=/dev/v4l/by-id/<camera>   # defaults to default_device
-service_profile=default                  # enforce a specific profile, or combine with service_allow_all=true
-service_allow_all=false                  # accept any enrolled profile
-service_warmup_delay=1.0                 # seconds to pre-heat IR emitters
-service_capture_duration=2.0             # seconds to gather frames per attempt
-service_frame_interval=0.1               # delay between frames during capture
-service_threshold=0.90                   # cosine similarity threshold (0..1)
-```
-
-### Running the daemon
-
-```
-cmake --build build --target lxfu_face_service
-./build/bin/lxfu_face_service    # foreground test run
-```
-
-Installers drop the binary in `/usr/bin/lxfu_face_service`, install a DBus policy (`/etc/dbus-1/system.d/dev.nabeeladzan.lxfu.conf`), and ship a systemd unit at `/etc/systemd/system/lxfu-face.service` (left disabled by default). Enable it with `sudo systemctl enable --now lxfu-face.service`, or wire the binary into your own supervisor. Clients should `Claim()`, call `VerifyStart("any")`, react to `VerificationStatus`, and finally `Release()` when finished.
 
 ## Development
 

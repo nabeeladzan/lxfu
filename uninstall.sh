@@ -46,23 +46,6 @@ if [[ -d "${PREFIX}/share/lxfu" ]]; then
   rmdir --ignore-fail-on-non-empty "${PREFIX}/share/lxfu"
 fi
 
-DBUS_POLICY="/etc/dbus-1/system.d/dev.nabeeladzan.lxfu.conf"
-if [[ -f "${DBUS_POLICY}" ]]; then
-  echo "Removing DBus policy ${DBUS_POLICY}"
-  rm -f "${DBUS_POLICY}"
-  if command -v busctl >/dev/null 2>&1; then
-    busctl call org.freedesktop.DBus / org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || true
-  fi
-fi
-
-SERVICE_PATH="/etc/systemd/system/lxfu-face.service"
-if [[ -f "${SERVICE_PATH}" ]]; then
-  echo "Removing systemd unit ${SERVICE_PATH}"
-  systemctl disable --now lxfu-face.service >/dev/null 2>&1 || true
-  rm -f "${SERVICE_PATH}"
-  systemctl daemon-reload >/dev/null 2>&1 || true
-fi
-
 echo "Uninstall complete!"
 echo ""
 echo "User data not removed:"
