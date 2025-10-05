@@ -11,13 +11,13 @@
 - ⚙️ **Configuration System**: Standard Linux configuration with `/etc/lxfu/lxfu.conf`
 - 📦 **FHS Compliant**: Follows Filesystem Hierarchy Standard
 - ⚡ **Fast Search**: Sub-millisecond face matching
-- 🎓 **DINOv2 Embeddings**: State-of-the-art self-supervised vision features
+- 🎓 **DINOv3 Embeddings**: State-of-the-art self-supervised vision features
 
-A high-performance headless face recognition CLI tool using DINOv2 and LMDB.
+A high-performance headless face recognition CLI tool using DINOv3 and LMDB.
 
 ## Overview
 
-LXFU is a production-ready face recognition system designed for Linux environments. It uses Meta's DINOv2 vision transformer for feature extraction and stores normalized embeddings inside an LMDB database keyed by profile name.
+LXFU is a production-ready face recognition system designed for Linux environments. It uses Meta's DINOv3 vision transformer for feature extraction and stores normalized embeddings inside an LMDB database keyed by profile name.
 
 ## Installation
 
@@ -193,7 +193,7 @@ Extracting face embedding...
 Edit `/etc/lxfu/lxfu.conf`:
 
 ```conf
-# Path to DINOv2 model file
+# Path to DINOv3 model file
 model_path=/usr/share/lxfu/dino.pt
 
 # Database storage directory
@@ -227,7 +227,7 @@ default_device=/dev/video0
                │
                ▼
 ┌─────────────────────────────────────────┐
-│  DINOv2: Feature Extraction             │
+│  DINOv3: Feature Extraction             │
 │  - TorchScript model (LibTorch)         │
 │  - Output: 384-dim embedding vector     │
 └──────────────┬──────────────────────────┘
@@ -252,7 +252,7 @@ default_device=/dev/video0
 
 1. Convert the captured frame to grayscale and equalize the histogram for stable detections.
 2. Execute the Haar cascade and take the largest bounding box as the primary subject.
-3. Expand the crop with padding and clamp it to image bounds before preprocessing for DINOv2.
+3. Expand the crop with padding and clamp it to image bounds before preprocessing for DINOv3.
 
 **Haar cascade location hints**
 
@@ -261,7 +261,7 @@ default_device=/dev/video0
 
 ### Embedding & Search Pipeline
 
-- Frames are resized to 224×224 and normalized with ImageNet statistics before being passed to the TorchScript DINOv2-small model (384-dimensional embeddings).
+- Frames are resized to 224×224 and normalized with ImageNet statistics before being passed to the TorchScript DINOv3-small model (384-dimensional embeddings).
 - Embeddings are L2-normalized and written directly into LMDB under the profile name.
 - Query compares the captured embedding with each stored vector using a cosine (dot product) similarity.
 
@@ -308,7 +308,7 @@ For development without system installation:
 
 ````
 $ ./build/bin/lxfu enroll face.jpg nabeel
-Loading DINOv2 model on CPU...
+Loading DINOv3 model on CPU...
 Loading/capturing face...
 Image loaded: 800x600
 Extracting face embedding...
@@ -320,7 +320,7 @@ Embedding extracted: 384 dimensions
   Total profiles: 1
 
 $ ./build/bin/lxfu query face.jpg nabeel
-Loading DINOv2 model on CPU...
+Loading DINOv3 model on CPU...
 Loading/capturing face...
 Image loaded: 800x600
 Extracting face embedding...
@@ -356,7 +356,7 @@ For face/image embeddings, **cosine similarity is superior to Euclidean distance
 
 - Focuses on directional similarity (pattern matching)
 - Invariant to embedding magnitude
-- Standard in computer vision (CLIP, DINOv2, FaceNet)
+- Standard in computer vision (CLIP, DINOv3, FaceNet)
 
 ### Performance
 
@@ -388,4 +388,4 @@ See [INSTALL.md](INSTALL.md) for common issues:
 See individual component licenses:
 
 - LMDB: OpenLDAP Public License
-- DINOv2: Apache 2.0
+- DINOv3: Apache 2.0

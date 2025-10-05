@@ -97,7 +97,7 @@ public:
         }
 
         if (verbose_) {
-            std::cout << "Loading DINOv2 model on " 
+            std::cout << "Loading DINOv3 model on " 
                       << (torch::cuda::is_available() ? "CUDA" : "CPU") << "..." << std::endl;
         }
         

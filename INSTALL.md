@@ -6,7 +6,7 @@ LXFU follows standard Linux filesystem hierarchy:
 
 ```
 /usr/bin/lxfu                    # Main executable
-/usr/share/lxfu/dino.pt          # DINOv2 model file (read-only)
+/usr/share/lxfu/dino.pt          # DINOv3 model file (read-only)
 /etc/lxfu/lxfu.conf              # System-wide configuration
 ~/.lxfu/                         # User database directory
   ├── lxfu_faces.index           # FAISS index
@@ -54,7 +54,7 @@ sudo install -Dm755 build/bin/lxfu /usr/local/bin/lxfu
 
 ### 2. Install the Model File
 
-Place the DINOv2 model in the shared data directory:
+Place the DINOv3 model in the shared data directory:
 
 ```bash
 sudo mkdir -p /usr/share/lxfu
@@ -136,7 +136,7 @@ LXFU loads configuration in this priority order:
 ### Configuration Options
 
 ```conf
-# Path to DINOv2 model file
+# Path to DINOv3 model file
 model_path=/usr/share/lxfu/dino.pt
 
 # Database storage directory

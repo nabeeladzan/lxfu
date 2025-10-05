@@ -17,7 +17,7 @@
 ### Face Detection
 
 - **Automatic face detection**: Uses OpenCV Haar Cascade to detect and crop faces
-- **Improved accuracy**: DINOv2 processes only face region, not background
+- **Improved accuracy**: DINOv3 processes only face region, not background
 - **Graceful fallback**: Uses full image if no face detected
 - **Multiple face handling**: Automatically selects largest (closest) face
 - **Configurable padding**: 20% padding around detected face for context
@@ -30,7 +30,7 @@
 - **Configuration file support**: LXFU now reads from `/etc/lxfu/lxfu.conf` (system) or `./lxfu.conf` (development)
 - **Standard Linux paths**: Model at `/usr/share/lxfu/dino.pt`, database at `~/.lxfu/`
 - **Configurable options**:
-  - `model_path` - DINOv2 model location
+  - `model_path` - DINOv3 model location
   - `db_path` - Database directory (FAISS + LMDB)
   - `default_device` - Default camera device
 - **Command-line override**: Arguments override configuration file settings
@@ -118,7 +118,7 @@ If you have an existing LXFU installation:
 ```conf
 # /etc/lxfu/lxfu.conf
 
-# Path to DINOv2 model file
+# Path to DINOv3 model file
 model_path=/usr/share/lxfu/dino.pt
 
 # Database storage directory (~ expands to $HOME)

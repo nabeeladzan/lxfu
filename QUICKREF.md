@@ -87,7 +87,7 @@ default_device=/dev/video0
 | Path                        | Description   |
 | --------------------------- | ------------- |
 | `/usr/bin/lxfu`             | Executable    |
-| `/usr/share/lxfu/dino.pt`   | DINOv2 model  |
+| `/usr/share/lxfu/dino.pt`   | DINOv3 model  |
 | `/etc/lxfu/lxfu.conf`       | System config |
 | `~/.lxfu/lxfu_faces.index`  | FAISS index   |
 | `~/.lxfu/lxfu_metadata.db/` | LMDB metadata |
